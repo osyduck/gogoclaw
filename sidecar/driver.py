@@ -24,8 +24,9 @@ def _default_launcher(*, headless, humanize, proxy):
 def drive(oauth_url, email, password, proxy=None, launcher=_default_launcher, headless=True):
     """Drive the browser to the OAuth callback. Returns {"ok": True} or
     {"ok": False, "reason": "..."}."""
-    browser = launcher(headless=headless, humanize=True, proxy=proxy)
+    browser = None
     try:
+        browser = launcher(headless=headless, humanize=True, proxy=proxy)
         page = browser.new_page()
         page.goto(oauth_url)
         page.locator("#identifierId").fill(email)
@@ -43,7 +44,8 @@ def drive(oauth_url, email, password, proxy=None, launcher=_default_launcher, he
     except Exception as exc:  # wrong password, 2FA, captcha, timeout, …
         return {"ok": False, "reason": str(exc)}
     finally:
-        try:
-            browser.close()
-        except Exception:
-            pass
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass

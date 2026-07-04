@@ -19,10 +19,13 @@ async def handle_drive(request):
 
     drive_fn = request.app["drive"]
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: drive_fn(body["oauth_url"], body["email"], body["password"], body.get("proxy")),
-    )
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: drive_fn(body["oauth_url"], body["email"], body["password"], body.get("proxy")),
+        )
+    except Exception as exc:
+        return web.json_response({"ok": False, "reason": str(exc)})
     return web.json_response(result)
 
 

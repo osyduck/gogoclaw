@@ -65,6 +65,14 @@ def test_drive_failure_returns_reason():
     assert browser.closed is True
 
 
+def test_drive_launcher_failure_returns_reason():
+    def boom(**kw):
+        raise RuntimeError("chromium launch failed")
+    result = drive("https://g/o", "a@x.com", "pw", launcher=boom)
+    assert result["ok"] is False
+    assert "chromium launch failed" in result["reason"]
+
+
 async def test_drive_endpoint_ok(aiohttp_client):
     app = make_app(drive_fn=lambda oauth_url, email, password, proxy=None: {"ok": True})
     client = await aiohttp_client(app)
