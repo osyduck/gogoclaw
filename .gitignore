@@ -1,0 +1,21 @@
+# Captured traffic — contains real access/refresh tokens + PII. Never commit.
+*.har
+
+# Superpowers scratch (briefs, reports, review diffs, progress ledger)
+.superpowers/
+
+# Go build artifacts
+/gogoclaw
+/gogoclaw.exe
+*.exe
+*.test
+*.out
+
+# SQLite runtime database (holds live bearer tokens)
+accounts.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+Thumbs.db
