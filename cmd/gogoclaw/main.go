@@ -13,6 +13,7 @@ import (
 	"gogoclaw/internal/api"
 	"gogoclaw/internal/auth"
 	"gogoclaw/internal/events"
+	"gogoclaw/internal/proxy"
 	"gogoclaw/internal/refresh"
 	"gogoclaw/internal/server"
 	"gogoclaw/internal/sidecar"
@@ -107,7 +108,8 @@ func canImport(py, mod string) bool {
 func buildHandler(st store.Store, c *api.Client, bus *events.Bus, al server.AutoLogin) (http.Handler, *refresh.Refresher) {
 	engine := auth.New(c, st, bus)
 	refresher := refresh.New(c, st, bus)
-	srv := server.New(engine, refresher, st, bus, al)
+	gw := proxy.New(st, api.BaseURL)
+	srv := server.New(engine, refresher, st, bus, al, gw)
 	return srv.Handler(), refresher
 }
 

@@ -12,6 +12,7 @@ import (
 	"gogoclaw/internal/api"
 	"gogoclaw/internal/auth"
 	"gogoclaw/internal/events"
+	"gogoclaw/internal/proxy"
 	"gogoclaw/internal/refresh"
 	"gogoclaw/internal/store"
 	"gogoclaw/web"
@@ -30,10 +31,11 @@ type Server struct {
 	store     store.Store
 	bus       *events.Bus
 	autoLogin AutoLogin
+	gateway   *proxy.Gateway
 }
 
-func New(engine *auth.AuthEngine, refresher *refresh.Refresher, st store.Store, bus *events.Bus, autoLogin AutoLogin) *Server {
-	return &Server{engine: engine, refresher: refresher, store: st, bus: bus, autoLogin: autoLogin}
+func New(engine *auth.AuthEngine, refresher *refresh.Refresher, st store.Store, bus *events.Bus, autoLogin AutoLogin, gateway *proxy.Gateway) *Server {
+	return &Server{engine: engine, refresher: refresher, store: st, bus: bus, autoLogin: autoLogin, gateway: gateway}
 }
 
 // Handler builds the route mux.
@@ -49,6 +51,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/accounts/{email}/refresh", s.handleRefreshOne)
 	mux.HandleFunc("DELETE /api/accounts/{email}", s.handleDelete)
 	mux.HandleFunc("GET /api/events", s.handleSSE)
+	if s.gateway != nil {
+		s.gateway.Register(mux)
+	}
 	mux.Handle("/", http.FileServerFS(web.DistFS()))
 	return mux
 }

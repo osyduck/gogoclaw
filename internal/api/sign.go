@@ -13,15 +13,17 @@ const (
 	BaseURL  = "https://autoglm-api.autoglm.ai"
 	SourceID = "autoclaw"
 
-	appID   = "100003"
-	appKey  = "38d2391985e2369a5fb8227d8e6cd5e5"
-	version = "1.10.3"
-	product = "autoclaw"
-	tm      = "win"
-	channel = "official"
-	lang    = "en"
+	appID  = "100003"
+	appKey = "38d2391985e2369a5fb8227d8e6cd5e5"
 
-	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	// Exported so the proxy package can build the same client-identity headers.
+	Version = "1.10.3"
+	Product = "autoclaw"
+	TM      = "win"
+	Channel = "official"
+	Lang    = "en"
+
+	UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 		"(KHTML, like Gecko) autoclaw/1.10.3 Chrome/130.0.6723.191 Electron/33.4.11 Safari/537.36"
 )
 
@@ -48,11 +50,11 @@ func signHeaders(ts int64) http.Header {
 	h.Set("x-auth-timestamp", strconv.FormatInt(ts, 10))
 	h.Set("x-auth-sign", sign(ts))
 	h.Set("x-trace-id", randUUID())
-	h.Set("x-version", version)
-	h.Set("x-tm", tm)
-	h.Set("x-product", product)
-	h.Set("x-channel", channel)
-	h.Set("x-lang", lang)
-	h.Set("user-agent", userAgent)
+	h.Set("x-version", Version)
+	h.Set("x-tm", TM)
+	h.Set("x-product", Product)
+	h.Set("x-channel", Channel)
+	h.Set("x-lang", Lang)
+	h.Set("user-agent", UserAgent)
 	return h
 }

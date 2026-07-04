@@ -1,4 +1,11 @@
-import type { Account, LoginSession, LoginStart, Provider } from "./types";
+import type {
+  Account,
+  LoginSession,
+  LoginStart,
+  Provider,
+  ProxyConfigUpdate,
+  ProxyConfigView,
+} from "./types";
 
 async function req(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(path, init);
@@ -64,4 +71,32 @@ export async function bulkLogin(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ accounts: creds, provider }),
   })) as BulkResult;
+}
+
+export async function getProxyConfig(): Promise<ProxyConfigView> {
+  const r = (await req("/api/proxy/config")) as {
+    mode: ProxyConfigView["mode"];
+    n: number;
+    api_key_set: boolean;
+    eligible_count: number;
+    current: string;
+  };
+  return {
+    mode: r.mode,
+    n: r.n,
+    apiKeySet: r.api_key_set,
+    eligibleCount: r.eligible_count,
+    current: r.current,
+  };
+}
+
+export async function saveProxyConfig(c: ProxyConfigUpdate): Promise<void> {
+  // Omit api_key entirely to keep the existing one; send "" to clear it.
+  const body: { mode: string; n: number; api_key?: string } = { mode: c.mode, n: c.n };
+  if (c.apiKey !== undefined) body.api_key = c.apiKey;
+  await req("/api/proxy/config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }

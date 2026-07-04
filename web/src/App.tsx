@@ -9,6 +9,7 @@ import { AddAccount } from "./components/AddAccount";
 import { BulkLogin } from "./components/BulkLogin";
 import { StatTiles } from "./components/StatTiles";
 import { EmptyState } from "./components/EmptyState";
+import { GatewayPanel } from "./components/GatewayPanel";
 
 function Dashboard() {
   useServerEvents();
@@ -64,6 +65,10 @@ function Dashboard() {
             busyEmail={refreshOne.isPending ? (refreshOne.variables as string) : undefined}
           />
         )}
+      </div>
+
+      <div className="mt-6">
+        <GatewayPanel />
       </div>
       {bulkOpen && <BulkLogin onClose={() => setBulkOpen(false)} />}
     </div>

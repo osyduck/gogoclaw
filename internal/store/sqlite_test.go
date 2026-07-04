@@ -265,3 +265,29 @@ func TestMissingEmail_ReturnsNotFoundError(t *testing.T) {
 		t.Error("SetStatus: expected error for missing email")
 	}
 }
+
+func TestProxyConfigDefaultsAndRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+
+	// Defaults when never set.
+	got, err := s.GetProxyConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != "round_robin" || got.N != 5 || got.APIKey != "" {
+		t.Fatalf("defaults = %+v", got)
+	}
+
+	// Round-trip.
+	want := ProxyConfig{Mode: "rotate_after_n", N: 3, APIKey: "secret"}
+	if err := s.SetProxyConfig(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetProxyConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("round-trip = %+v, want %+v", got, want)
+	}
+}
