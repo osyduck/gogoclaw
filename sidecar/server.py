@@ -1,5 +1,5 @@
 """aiohttp server exposing the sidecar's /drive and /health endpoints."""
-import asyncio
+import inspect
 
 from aiohttp import web
 
@@ -20,13 +20,13 @@ async def handle_drive(request):
         return web.json_response({"ok": False, "reason": f"missing: {', '.join(missing)}"}, status=400)
 
     drive_fn = request.app["drive"]
-    loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: drive_fn(body["oauth_url"], body["email"], body["password"],
-                             body.get("proxy"), provider=body.get("provider", "google")),
-        )
+        # The real driver is async (cloakbrowser runs on this event loop);
+        # test stubs may return a plain dict — accept both.
+        result = drive_fn(body["oauth_url"], body["email"], body["password"],
+                          body.get("proxy"), provider=body.get("provider", "google"))
+        if inspect.isawaitable(result):
+            result = await result
     except Exception as exc:
         return web.json_response({"ok": False, "reason": str(exc)})
     return web.json_response(result)

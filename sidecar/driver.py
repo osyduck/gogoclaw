@@ -1,5 +1,9 @@
 """Drives OAuth consent in a stealth CloakBrowser to the callback redirect.
 
+Async: cloakbrowser's Playwright runs on the sidecar's aiohttp event loop
+(launch_async), so the whole drive is a coroutine. Using the sync API here would
+trip Playwright's "Sync API inside the asyncio loop" guard.
+
 Two providers:
 - "google": Google's own consent page (email/password + consent).
 - "zai": chat.z.ai brokers the Google login — an extra "Continue with Google"
@@ -29,55 +33,58 @@ CONSENT_SELECTORS = [
 ]
 
 
-def _default_launcher(*, headless, humanize, proxy):
+async def _default_launcher(*, headless, humanize, proxy):
     # Imported lazily so tests (which inject a fake launcher) don't need the real
     # stealth Chromium download.
-    from cloakbrowser import launch
+    from cloakbrowser import launch_async
 
-    return launch(headless=headless, humanize=humanize, proxy=proxy)
+    return await launch_async(headless=headless, humanize=humanize, proxy=proxy)
 
 
-def _best_effort(fn):
+async def _click_best_effort(page, selector, timeout=BEST_EFFORT_MS):
     try:
-        fn()
+        await page.locator(selector).click(timeout=timeout)
     except Exception:
         pass
 
 
-def _google_login(page, email, password):
-    page.locator("#identifierId").fill(email)
-    page.locator("#identifierNext").click()
-    page.locator('input[name="Passwd"]').fill(password)
-    page.locator("#passwordNext").click()
+async def _google_login(page, email, password):
+    await page.locator("#identifierId").fill(email)
+    await page.locator("#identifierNext").click()
+    await page.locator('input[name="Passwd"]').fill(password)
+    await page.locator("#passwordNext").click()
     # A consent/speedbump screen may or may not appear; best-effort, never fatal.
     for sel in CONSENT_SELECTORS:
-        _best_effort(lambda sel=sel: page.locator(sel).click(timeout=BEST_EFFORT_MS))
+        await _click_best_effort(page, sel)
 
 
-def drive(oauth_url, email, password, proxy=None, provider="google",
-          launcher=_default_launcher, headless=True):
+async def drive(oauth_url, email, password, proxy=None, provider="google",
+                launcher=_default_launcher, headless=True):
     """Drive the browser to the OAuth callback. Returns {"ok": True} or
     {"ok": False, "reason": "..."}."""
     browser = None
     try:
-        browser = launcher(headless=headless, humanize=True, proxy=proxy)
-        page = browser.new_page()
-        page.goto(oauth_url)
+        browser = await launcher(headless=headless, humanize=True, proxy=proxy)
+        page = await browser.new_page()
+        await page.goto(oauth_url)
         if provider == "zai":
             # chat.z.ai login page → hand off to Google.
-            page.locator("button:has-text('Continue with Google')").click(timeout=BEST_EFFORT_MS * 4)
-        _google_login(page, email, password)
+            await page.locator("button:has-text('Continue with Google')").click(timeout=BEST_EFFORT_MS * 4)
+        await _google_login(page, email, password)
         if provider == "zai":
             # chat.z.ai authorize: Continue is disabled until ToS is ticked.
-            _best_effort(lambda: page.locator("input[type='checkbox']").check(timeout=BEST_EFFORT_MS))
-            _best_effort(lambda: page.locator("button:has-text('Continue')").click(timeout=BEST_EFFORT_MS * 4))
-        page.wait_for_url(CALLBACK_URL_GLOB)
+            try:
+                await page.locator("input[type='checkbox']").check(timeout=BEST_EFFORT_MS)
+            except Exception:
+                pass
+            await _click_best_effort(page, "button:has-text('Continue')", timeout=BEST_EFFORT_MS * 4)
+        await page.wait_for_url(CALLBACK_URL_GLOB)
         return {"ok": True}
     except Exception as exc:  # wrong password, 2FA, captcha, timeout, …
         return {"ok": False, "reason": str(exc)}
     finally:
         if browser is not None:
             try:
-                browser.close()
+                await browser.close()
             except Exception:
                 pass

@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sidecar.driver import drive
 from sidecar.server import make_app
@@ -8,13 +10,13 @@ class FakeLocator:
         self.calls = calls
         self.sel = sel
 
-    def fill(self, value, **kw):
+    async def fill(self, value, **kw):
         self.calls.append(("fill", self.sel, value))
 
-    def click(self, **kw):
+    async def click(self, **kw):
         self.calls.append(("click", self.sel))
 
-    def check(self, **kw):
+    async def check(self, **kw):
         self.calls.append(("check", self.sel))
 
 
@@ -23,13 +25,13 @@ class FakePage:
         self.calls = calls
         self.fail_on_wait = fail_on_wait
 
-    def goto(self, url):
+    async def goto(self, url):
         self.calls.append(("goto", url))
 
-    def locator(self, sel):
+    def locator(self, sel):  # locator() is synchronous in Playwright
         return FakeLocator(self.calls, sel)
 
-    def wait_for_url(self, glob, **kw):
+    async def wait_for_url(self, glob, **kw):
         if self.fail_on_wait:
             raise RuntimeError("navigation timeout")
         self.calls.append(("wait_for_url", glob))
@@ -41,17 +43,23 @@ class FakeBrowser:
         self.fail_on_wait = fail_on_wait
         self.closed = False
 
-    def new_page(self):
+    async def new_page(self):
         return FakePage(self.calls, self.fail_on_wait)
 
-    def close(self):
+    async def close(self):
         self.closed = True
+
+
+def async_launcher(browser):
+    async def _launch(**kw):
+        return browser
+    return _launch
 
 
 def test_drive_success_fills_and_waits():
     calls = []
     browser = FakeBrowser(calls)
-    result = drive("https://g/o", "a@x.com", "pw", launcher=lambda **kw: browser)
+    result = asyncio.run(drive("https://g/o", "a@x.com", "pw", launcher=async_launcher(browser)))
     assert result == {"ok": True}
     # email + password were filled and the callback redirect was awaited
     assert ("fill", "#identifierId", "a@x.com") in calls
@@ -62,16 +70,16 @@ def test_drive_success_fills_and_waits():
 
 def test_drive_failure_returns_reason():
     browser = FakeBrowser([], fail_on_wait=True)
-    result = drive("https://g/o", "a@x.com", "pw", launcher=lambda **kw: browser)
+    result = asyncio.run(drive("https://g/o", "a@x.com", "pw", launcher=async_launcher(browser)))
     assert result["ok"] is False
     assert "timeout" in result["reason"]
     assert browser.closed is True
 
 
 def test_drive_launcher_failure_returns_reason():
-    def boom(**kw):
+    async def boom(**kw):
         raise RuntimeError("chromium launch failed")
-    result = drive("https://g/o", "a@x.com", "pw", launcher=boom)
+    result = asyncio.run(drive("https://g/o", "a@x.com", "pw", launcher=boom))
     assert result["ok"] is False
     assert "chromium launch failed" in result["reason"]
 
@@ -79,8 +87,8 @@ def test_drive_launcher_failure_returns_reason():
 def test_drive_zai_clicks_google_then_authorizes():
     calls = []
     browser = FakeBrowser(calls)
-    result = drive("https://chat.z.ai/x", "a@x.com", "pw", provider="zai",
-                   launcher=lambda **kw: browser)
+    result = asyncio.run(drive("https://chat.z.ai/x", "a@x.com", "pw", provider="zai",
+                               launcher=async_launcher(browser)))
     assert result == {"ok": True}
     sels = [c[1] for c in calls if c[0] == "click"]
     # pre-step: continue with Google on chat.z.ai
