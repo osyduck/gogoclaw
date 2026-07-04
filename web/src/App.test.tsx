@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { queryClient } from "./lib/queryClient";
@@ -31,4 +32,16 @@ test("renders accounts and a total count when the list is non-empty", async () =
   render(<App />);
   await waitFor(() => expect(screen.getByText("a@x.com")).toBeInTheDocument());
   expect(screen.getByRole("button", { name: /bulk login/i })).toBeEnabled();
+});
+
+test("clicking Bulk login opens the bulk stealth login modal", async () => {
+  mockAccounts([
+    { email: "a@x.com", user_id: "u", status: "active", access_expires_at: 9_999_999_999, refresh_expires_at: 9_999_999_999, last_refreshed_at: 1, added_at: 1 },
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText("a@x.com")).toBeInTheDocument());
+
+  await userEvent.click(screen.getByRole("button", { name: /bulk login/i }));
+
+  expect(screen.getByText(/bulk stealth login/i)).toBeInTheDocument();
 });
