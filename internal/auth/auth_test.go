@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +19,19 @@ import (
 // failDriver simulates the stealth sidecar reporting a failed login.
 type failDriver struct{ err error }
 
-func (f failDriver) Drive(context.Context, api.Provider, string, *GoogleCred) error { return f.err }
+func (f failDriver) Drive(context.Context, api.Provider, string, *GoogleCred, func(string)) error {
+	return f.err
+}
+
+// stepDriver reports progress steps then succeeds, exercising step recording.
+type stepDriver struct{ steps []string }
+
+func (d stepDriver) Drive(_ context.Context, _ api.Provider, _ string, _ *GoogleCred, onStep func(string)) error {
+	for _, s := range d.steps {
+		onStep(s)
+	}
+	return nil
+}
 
 // tok builds a minimal unsigned JWT ("Bearer h.<payload>.s") whose payload decodes
 // to the given claims — so api.ParseClaims reads back exactly this jti/exp.
@@ -193,6 +206,32 @@ func TestHandleCallback_ZaiUsesZaiLoginEndpoint(t *testing.T) {
 	}
 	if _, err := st.Get("evmsnipe@gmail.com"); err != nil {
 		t.Errorf("account not persisted: %v", err)
+	}
+}
+
+// TestStartLogin_RecordsDriverSteps guards that per-action steps reported by the
+// driver are recorded on the session so the UI can render a live terminal.
+func TestStartLogin_RecordsDriverSteps(t *testing.T) {
+	e, _ := newEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"oauth_url": "u", "state": "st-s"}})
+	})
+	drv := stepDriver{steps: []string{"[  0.0s] launch", "[  1.0s] enter email"}}
+	state, _, err := e.StartLogin(context.Background(), drv, api.ProviderGoogle, &GoogleCred{Email: "a@x.com", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Steps are appended from the Drive goroutine; poll briefly.
+	var s Session
+	for i := 0; i < 100; i++ {
+		s, _ = e.Status(state)
+		if len(s.Steps) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(s.Steps) != 2 || !strings.Contains(s.Steps[1], "enter email") {
+		t.Errorf("session steps = %v, want the two driver steps", s.Steps)
 	}
 }
 

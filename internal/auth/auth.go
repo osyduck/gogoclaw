@@ -23,16 +23,18 @@ type GoogleCred struct {
 
 // LoginDriver drives the consent step for a login. Manual = no-op (the UI opens
 // the URL); auto (Plan 4) = a headless stealth browser. provider selects the
-// driving flow (google = direct consent; zai = chat.z.ai broker).
+// driving flow (google = direct consent; zai = chat.z.ai broker). onStep, when
+// non-nil, receives each timestamped progress line so the UI can show a live
+// step-by-step terminal.
 type LoginDriver interface {
-	Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred) error
+	Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred, onStep func(string)) error
 }
 
 // ManualDriver does nothing — the user completes consent in their own browser and
 // the redirect to the callback finishes the flow.
 type ManualDriver struct{}
 
-func (ManualDriver) Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred) error {
+func (ManualDriver) Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred, onStep func(string)) error {
 	return nil
 }
 
@@ -43,6 +45,7 @@ type Session struct {
 	Email     string    `json:"email,omitempty"`
 	Err       string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	Steps     []string  `json:"steps,omitempty"`
 
 	identity identity.Identity
 	provider api.Provider
@@ -84,8 +87,15 @@ func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, provide
 	e.pending[state] = sess
 	e.mu.Unlock()
 
+	onStep := func(line string) {
+		e.mu.Lock()
+		if s, ok := e.pending[state]; ok {
+			s.Steps = append(s.Steps, line)
+		}
+		e.mu.Unlock()
+	}
 	go func() {
-		if err := driver.Drive(context.Background(), provider, oauthURL, cred); err != nil {
+		if err := driver.Drive(context.Background(), provider, oauthURL, cred, onStep); err != nil {
 			e.fail(state, fmt.Errorf("driver: %w", err))
 		}
 	}()
@@ -169,6 +179,8 @@ func (e *AuthEngine) Status(state string) (Session, bool) {
 	}
 	snap := *sess
 	snap.identity = identity.Identity{}
+	// Copy the steps slice so callers never read it while Drive appends under lock.
+	snap.Steps = append([]string(nil), sess.Steps...)
 	return snap, true
 }
 

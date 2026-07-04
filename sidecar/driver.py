@@ -10,27 +10,30 @@ Two providers:
   pre-step and a chat.z.ai authorize (ToS checkbox + Continue) post-step wrap
   the same Google steps.
 
-Stateless: it knows nothing about tokens/state. The browser's redirect to
+After the password, Google can show a variable sequence of screens (a
+Workspace/Education "I understand" speedbump, then an OAuth consent), and for
+zai a final chat.z.ai authorize page. Those are walked by a URL-driven state
+machine (`_advance`) that waits for each screen instead of racing navigation.
+
+Progress: each action is announced through the optional `emit` async callback
+(timestamped), so the UI can show a live step-by-step terminal and see exactly
+which step stalled. Stateless otherwise: the browser's redirect to
 http://localhost:18432/** is captured by GogoClaw's own callback handler; this
 module only reports whether the browser reached that point.
 """
+import re
+import time
 
+CALLBACK_PREFIX = "http://localhost:18432/"
 CALLBACK_URL_GLOB = "http://localhost:18432/**"
-BEST_EFFORT_MS = 2500
 
-# Approve/continue buttons vary by the account's Google locale, plus a
-# Workspace/Education "I understand" speedbump. Best-effort, never fatal.
-CONSENT_SELECTORS = [
-    "#submit_approve_access",
-    "button:has-text('I understand')",
-    "button:has-text('Continue')",
-    "button:has-text('Allow')",
-    "button:has-text('Lanjutkan')",   # id
-    "button:has-text('Izinkan')",     # id
-    "button:has-text('Continuar')",   # es/pt
-    "button:has-text('Weiter')",      # de
-    "button:has-text('Autoriser')",   # fr
-]
+# Any of these accessible button names advances a Google speedbump/consent
+# screen; the name varies by the account's locale.
+CONSENT_NAME = re.compile(
+    r"I understand|Continue|Allow|Confirm|Lanjutkan|Izinkan|Konfirmasi|"
+    r"Continuar|Weiter|Autoriser|Aceptar|同意|同意する",
+    re.I,
+)
 
 
 async def _default_launcher(*, headless, humanize, proxy):
@@ -41,48 +44,79 @@ async def _default_launcher(*, headless, humanize, proxy):
     return await launch_async(headless=headless, humanize=humanize, proxy=proxy)
 
 
-async def _click_best_effort(page, selector, timeout=BEST_EFFORT_MS):
-    try:
-        await page.locator(selector).click(timeout=timeout)
-    except Exception:
-        pass
+async def _advance(page, provider, step):
+    """Walk the post-password screens until the browser reaches the callback.
 
-
-async def _google_login(page, email, password):
-    await page.locator("#identifierId").fill(email)
-    await page.locator("#identifierNext").click()
-    await page.locator('input[name="Passwd"]').fill(password)
-    await page.locator("#passwordNext").click()
-    # A consent/speedbump screen may or may not appear; best-effort, never fatal.
-    for sel in CONSENT_SELECTORS:
-        await _click_best_effort(page, sel)
+    Each iteration inspects the current URL and either handles the chat.z.ai
+    authorize page (zai), clicks a Google speedbump/consent button, or waits for
+    the next navigation. Bounded so a stuck flow fails fast with a clear step.
+    """
+    for _ in range(8):
+        url = page.url
+        if url.startswith(CALLBACK_PREFIX):
+            return
+        if provider == "zai" and "/auth/oauth/authorize" in url:
+            # chat.z.ai authorize: Continue is disabled until the ToS role=checkbox
+            # is ticked. Click (don't .check(), which hangs on is_checked here).
+            cb = page.get_by_role("checkbox").first
+            await cb.wait_for(state="visible", timeout=8000)
+            await cb.click()
+            await page.get_by_role("button", name="Continue").first.click(timeout=8000)
+            await step("authorized chat.z.ai")
+            continue
+        # A Google speedbump ("I understand") or OAuth consent — click whatever
+        # matching button is on screen, waiting for it to appear.
+        try:
+            btn = page.get_by_role("button", name=CONSENT_NAME).first
+            await btn.wait_for(state="visible", timeout=6000)
+            await btn.click()
+            await step(f"consent: {(await btn.inner_text()).strip()[:24]}")
+            continue
+        except Exception:
+            pass
+        # Nothing actionable yet — give the flow a moment to navigate, then recheck.
+        try:
+            await page.wait_for_load_state("networkidle", timeout=4000)
+        except Exception:
+            return
 
 
 async def drive(oauth_url, email, password, proxy=None, provider="google",
-                launcher=_default_launcher, headless=True):
-    """Drive the browser to the OAuth callback. Returns {"ok": True} or
-    {"ok": False, "reason": "..."}."""
+                launcher=_default_launcher, headless=True, emit=None):
+    """Drive the browser to the OAuth callback, announcing each step through
+    `emit`. Returns {"ok": True} or {"ok": False, "reason": "..."}."""
+    t0 = time.monotonic()
+
+    async def step(msg):
+        if emit is not None:
+            await emit(f"[{time.monotonic() - t0:5.1f}s] {msg}")
+
     browser = None
     try:
+        await step(f"launch stealth browser (provider={provider})")
         # An empty proxy string (the Go side always sends the field) must become
         # None, else Playwright rejects it with "Invalid URL".
         browser = await launcher(headless=headless, humanize=True, proxy=proxy or None)
         page = await browser.new_page()
+        await step("open authorize page")
         await page.goto(oauth_url)
         if provider == "zai":
-            # chat.z.ai login page → hand off to Google.
-            await page.locator("button:has-text('Continue with Google')").click(timeout=BEST_EFFORT_MS * 4)
-        await _google_login(page, email, password)
-        if provider == "zai":
-            # chat.z.ai authorize: Continue is disabled until ToS is ticked.
-            try:
-                await page.locator("input[type='checkbox']").check(timeout=BEST_EFFORT_MS)
-            except Exception:
-                pass
-            await _click_best_effort(page, "button:has-text('Continue')", timeout=BEST_EFFORT_MS * 4)
-        await page.wait_for_url(CALLBACK_URL_GLOB)
+            await step("click 'Continue with Google'")
+            await page.locator("button:has-text('Continue with Google')").click(timeout=15000)
+        await step("enter email")
+        await page.locator("#identifierId").fill(email)
+        await page.locator("#identifierNext").click()
+        await step("enter password")
+        await page.locator('input[name="Passwd"]').fill(password)
+        await page.locator("#passwordNext").click()
+        await step("walk consent / authorize screens")
+        await _advance(page, provider, step)
+        await step("wait for callback redirect")
+        await page.wait_for_url(CALLBACK_URL_GLOB, timeout=45000)
+        await step("callback reached OK")
         return {"ok": True}
     except Exception as exc:  # wrong password, 2FA, captcha, timeout, …
+        await step(f"ERROR: {exc}")
         return {"ok": False, "reason": str(exc)}
     finally:
         if browser is not None:

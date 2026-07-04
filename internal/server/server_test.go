@@ -50,7 +50,9 @@ func (f *fakeAutoLogin) Driver() auth.LoginDriver     { return f.driver }
 // stubDriver is a LoginDriver that succeeds immediately (no browser).
 type stubDriver struct{}
 
-func (stubDriver) Drive(context.Context, api.Provider, string, *auth.GoogleCred) error { return nil }
+func (stubDriver) Drive(context.Context, api.Provider, string, *auth.GoogleCred, func(string)) error {
+	return nil
+}
 
 func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) http.Handler {
 	srv := httptest.NewServer(autoglm)

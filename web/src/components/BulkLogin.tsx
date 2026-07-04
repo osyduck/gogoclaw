@@ -23,7 +23,10 @@ interface Row {
   state?: string; // absent when the server rejected the account outright
   status: RowStatus;
   error?: string;
+  steps?: string[]; // live per-action log streamed from the sidecar
 }
+
+type RowUpdate = { state?: string; steps?: string[]; status?: RowStatus; error?: string };
 
 interface Props {
   onClose: () => void;
@@ -76,27 +79,34 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
     const pending = rows.filter((r) => r.status === "pending" && r.state);
     if (pending.length === 0) return;
     const id = setInterval(async () => {
-      const resolved = await Promise.all(
-        pending.map(async (r) => {
+      const updates = await Promise.all(
+        pending.map(async (r): Promise<RowUpdate | null> => {
           try {
             const s = await loginStatus(r.state!);
-            if (s.status === "ok") return { state: r.state, status: "ok" as const };
-            if (s.status === "error") return { state: r.state, status: "error" as const, error: s.error };
+            const base: RowUpdate = { state: r.state, steps: s.steps };
+            if (s.status === "ok") return { ...base, status: "ok" };
+            if (s.status === "error") return { ...base, status: "error", error: s.error };
+            if (Date.now() - startedAt.current > timeoutMs) return { ...base, status: "timeout" };
+            return base; // still pending, but its step log advanced
           } catch {
             // transient (server busy / stream hiccup) — keep the row pending.
+            if (Date.now() - startedAt.current > timeoutMs) return { state: r.state, status: "timeout" };
+            return null;
           }
-          if (Date.now() - startedAt.current > timeoutMs) {
-            return { state: r.state, status: "timeout" as const };
-          }
-          return null;
         }),
       );
-      const changes = resolved.filter((c): c is NonNullable<typeof c> => c !== null);
+      const changes = updates.filter((u): u is RowUpdate => u !== null);
       if (changes.length === 0) return;
       setRows((cur) =>
         cur?.map((r) => {
-          const c = changes.find((x) => x.state === r.state);
-          return c ? { ...r, status: c.status, error: "error" in c ? c.error : r.error } : r;
+          const u = changes.find((x) => x.state === r.state);
+          if (!u) return r;
+          return {
+            ...r,
+            steps: u.steps ?? r.steps,
+            status: u.status ?? r.status,
+            error: "error" in u ? u.error : r.error,
+          };
         }) ?? cur,
       );
     }, pollMs);
@@ -146,11 +156,14 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
               {okCount > 0 && <span className="text-ok">{okCount} signed in</span>}
               {failCount > 0 && <span className="text-err">{failCount} failed</span>}
             </div>
-            <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-panel p-2 text-sm">
+            <ul className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-border bg-panel p-2 text-sm">
               {rows.map((r) => (
-                <li key={r.email} className="flex items-center justify-between gap-3 px-1 py-1">
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={r.email}>{r.email}</span>
-                  <StatusChip row={r} />
+                <li key={r.email} className="px-1 py-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={r.email}>{r.email}</span>
+                    <StatusChip row={r} />
+                  </div>
+                  {r.steps && r.steps.length > 0 && <StepLog steps={r.steps} status={r.status} />}
                 </li>
               ))}
             </ul>
@@ -169,6 +182,33 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// StepLog renders the sidecar's per-action progress as a live terminal — one
+// line per step, ERROR lines in red, the final success line in green — and
+// keeps itself scrolled to the newest line.
+function StepLog({ steps, status }: { steps: string[]; status: RowStatus }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [steps.length]);
+  return (
+    <div
+      ref={ref}
+      aria-label="login steps"
+      className="mt-1 max-h-28 overflow-y-auto rounded bg-black/50 p-2 font-mono text-[11px] leading-relaxed text-muted"
+    >
+      {steps.map((s, i) => {
+        const isError = s.includes("ERROR");
+        const isDone = status === "ok" && i === steps.length - 1;
+        return (
+          <div key={i} className={isError ? "text-err" : isDone ? "text-ok" : undefined}>
+            {s}
+          </div>
+        );
+      })}
     </div>
   );
 }
