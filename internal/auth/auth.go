@@ -21,17 +21,20 @@ type GoogleCred struct {
 	Proxy    string // optional residential proxy; empty = none
 }
 
-// LoginDriver drives the Google consent step for a login. Manual = no-op (the UI
-// opens the URL); auto (Plan 4) = a headless stealth browser.
+// LoginDriver drives the consent step for a login. Manual = no-op (the UI opens
+// the URL); auto (Plan 4) = a headless stealth browser. provider selects the
+// driving flow (google = direct consent; zai = chat.z.ai broker).
 type LoginDriver interface {
-	Drive(ctx context.Context, oauthURL string, cred *GoogleCred) error
+	Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred) error
 }
 
 // ManualDriver does nothing — the user completes consent in their own browser and
 // the redirect to the callback finishes the flow.
 type ManualDriver struct{}
 
-func (ManualDriver) Drive(ctx context.Context, oauthURL string, cred *GoogleCred) error { return nil }
+func (ManualDriver) Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred) error {
+	return nil
+}
 
 // Session is the state of one in-flight or completed login.
 type Session struct {
@@ -42,6 +45,7 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	identity identity.Identity
+	provider api.Provider
 }
 
 // AuthEngine coordinates login sessions.
@@ -61,16 +65,16 @@ func New(c *api.Client, st store.Store, bus *events.Bus) *AuthEngine {
 // StartLogin generates a device identity, obtains the Google OAuth URL, records a
 // pending session, and dispatches the driver. It returns immediately; the callback
 // completes the flow. For ManualDriver the returned oauthURL is what the UI opens.
-func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, cred *GoogleCred) (string, string, error) {
+func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, provider api.Provider, cred *GoogleCred) (string, string, error) {
 	id, err := identity.New()
 	if err != nil {
 		return "", "", fmt.Errorf("generate identity: %w", err)
 	}
-	oauthURL, state, err := e.api.GoogleOAuthURL(ctx, id.DeviceID)
+	oauthURL, state, err := e.api.OAuthURL(ctx, provider, id.DeviceID)
 	if err != nil {
 		return "", "", fmt.Errorf("oauth url: %w", err)
 	}
-	sess := &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id}
+	sess := &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id, provider: provider}
 	if cred != nil {
 		// Auto/bulk logins know the target email up front; recording it lets the
 		// UI show per-account progress and lets failures be attributed to a row.
@@ -81,7 +85,7 @@ func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, cred *G
 	e.mu.Unlock()
 
 	go func() {
-		if err := driver.Drive(context.Background(), oauthURL, cred); err != nil {
+		if err := driver.Drive(context.Background(), provider, oauthURL, cred); err != nil {
 			e.fail(state, fmt.Errorf("driver: %w", err))
 		}
 	}()
@@ -93,8 +97,9 @@ func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) err
 	e.mu.Lock()
 	sess, ok := e.pending[state]
 	var status, sessErr string
+	var provider api.Provider
 	if ok {
-		status, sessErr = sess.Status, sess.Err
+		status, sessErr, provider = sess.Status, sess.Err, sess.provider
 	}
 	e.mu.Unlock()
 	if !ok {
@@ -113,7 +118,7 @@ func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) err
 		return errors.New(sessErr)
 	}
 
-	res, err := e.api.GoogleOAuthLogin(ctx, sess.identity.DeviceID, code, state)
+	res, err := e.api.OAuthLogin(ctx, provider, sess.identity.DeviceID, code, state)
 	if err != nil {
 		e.fail(state, err)
 		return err

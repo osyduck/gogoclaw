@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gogoclaw/internal/api"
 )
 
 func TestAutoDriver_PostsCredsAndSucceeds(t *testing.T) {
@@ -26,12 +28,15 @@ func TestAutoDriver_PostsCredsAndSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	d := NewAutoDriver(srv.URL)
-	err := d.Drive(context.Background(), "https://accounts.google.com/o", &GoogleCred{Email: "a@x.com", Password: "pw"})
+	err := d.Drive(context.Background(), api.ProviderZai, "https://accounts.google.com/o", &GoogleCred{Email: "a@x.com", Password: "pw"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotBody["oauth_url"] != "https://accounts.google.com/o" || gotBody["email"] != "a@x.com" || gotBody["password"] != "pw" {
 		t.Errorf("body = %v", gotBody)
+	}
+	if gotBody["provider"] != "zai" {
+		t.Errorf("provider = %q, want zai", gotBody["provider"])
 	}
 }
 
@@ -40,14 +45,14 @@ func TestAutoDriver_FailureReasonBecomesError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": "wrong password"})
 	}))
 	defer srv.Close()
-	err := NewAutoDriver(srv.URL).Drive(context.Background(), "u", &GoogleCred{Email: "a@x.com", Password: "bad"})
+	err := NewAutoDriver(srv.URL).Drive(context.Background(), api.ProviderGoogle, "u", &GoogleCred{Email: "a@x.com", Password: "bad"})
 	if err == nil || !strings.Contains(err.Error(), "wrong password") {
 		t.Errorf("expected error containing reason, got %v", err)
 	}
 }
 
 func TestAutoDriver_NilCredErrors(t *testing.T) {
-	if err := NewAutoDriver("http://127.0.0.1:1").Drive(context.Background(), "u", nil); err == nil {
+	if err := NewAutoDriver("http://127.0.0.1:1").Drive(context.Background(), api.ProviderGoogle, "u", nil); err == nil {
 		t.Error("expected error for nil credentials")
 	}
 }
@@ -81,7 +86,7 @@ func TestAutoDriver_BoundsConcurrencyToThree(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_ = d.Drive(context.Background(), "u", &GoogleCred{Email: "a@x.com", Password: "pw"})
+			_ = d.Drive(context.Background(), api.ProviderGoogle, "u", &GoogleCred{Email: "a@x.com", Password: "pw"})
 		}(i)
 	}
 	wg.Wait()

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"gogoclaw/internal/api"
 )
 
 // AutoDriver drives Google consent via the CloakBrowser sidecar (Plan 4).
@@ -22,7 +24,7 @@ func NewAutoDriver(sidecarURL string) *AutoDriver {
 
 // Drive posts the credentials to the sidecar's /drive and blocks until it reports
 // reaching the callback redirect (ok) or failing (reason).
-func (d *AutoDriver) Drive(ctx context.Context, oauthURL string, cred *GoogleCred) error {
+func (d *AutoDriver) Drive(ctx context.Context, provider api.Provider, oauthURL string, cred *GoogleCred) error {
 	if cred == nil {
 		return fmt.Errorf("auto login requires Google credentials")
 	}
@@ -33,7 +35,8 @@ func (d *AutoDriver) Drive(ctx context.Context, oauthURL string, cred *GoogleCre
 		return ctx.Err()
 	}
 	payload := map[string]string{
-		"oauth_url": oauthURL, "email": cred.Email, "password": cred.Password, "proxy": cred.Proxy,
+		"oauth_url": oauthURL, "email": cred.Email, "password": cred.Password,
+		"proxy": cred.Proxy, "provider": string(provider),
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {

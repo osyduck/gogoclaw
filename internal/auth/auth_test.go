@@ -18,7 +18,7 @@ import (
 // failDriver simulates the stealth sidecar reporting a failed login.
 type failDriver struct{ err error }
 
-func (f failDriver) Drive(context.Context, string, *GoogleCred) error { return f.err }
+func (f failDriver) Drive(context.Context, api.Provider, string, *GoogleCred) error { return f.err }
 
 // tok builds a minimal unsigned JWT ("Bearer h.<payload>.s") whose payload decodes
 // to the given claims — so api.ParseClaims reads back exactly this jti/exp.
@@ -45,7 +45,7 @@ func TestStartLogin_ReturnsStateAndURL(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
 			"data": map[string]any{"oauth_url": "https://accounts.google.com/o", "state": "st-1"}})
 	})
-	state, url, err := e.StartLogin(context.Background(), ManualDriver{}, nil)
+	state, url, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderGoogle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestHandleCallback_PersistsAccount(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
 	})
-	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, nil); err != nil {
+	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderGoogle, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.HandleCallback(context.Background(), "auth-code", "st-2"); err != nil {
@@ -105,7 +105,7 @@ func TestHandleCallback_IdempotentOnReload(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
 	})
-	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, nil); err != nil {
+	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderGoogle, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.HandleCallback(context.Background(), "auth-code", "st-3"); err != nil {
@@ -141,7 +141,7 @@ func TestStartLogin_AutoFailureAttributesEmail(t *testing.T) {
 	defer unsub()
 
 	cred := &GoogleCred{Email: "bulk@x.com", Password: "pw"}
-	state, _, err := e.StartLogin(context.Background(), failDriver{err: errors.New("stealth login failed: blocked")}, cred)
+	state, _, err := e.StartLogin(context.Background(), failDriver{err: errors.New("stealth login failed: blocked")}, api.ProviderZai, cred)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +164,35 @@ func TestStartLogin_AutoFailureAttributesEmail(t *testing.T) {
 	}
 	if s.Err == "" {
 		t.Error("session error reason is empty")
+	}
+}
+
+// TestHandleCallback_ZaiUsesZaiLoginEndpoint guards that a session started with
+// the zai provider completes via the zai-oauth-login endpoint (not google's).
+func TestHandleCallback_ZaiUsesZaiLoginEndpoint(t *testing.T) {
+	var loginPath string
+	e, st := newEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		var data map[string]any
+		switch r.URL.Path {
+		case "/userapi/overseasv1/zai-oauth-url":
+			data = map[string]any{"oauth_url": "https://chat.z.ai/x", "state": "st-z"}
+		case "/userapi/overseasv1/zai-oauth-login":
+			loginPath = r.URL.Path
+			data = map[string]any{"access_token": jwtA, "refresh_token": jwtA, "user_id": "hexid"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
+	})
+	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderZai, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HandleCallback(context.Background(), "code-z", "st-z"); err != nil {
+		t.Fatal(err)
+	}
+	if loginPath != "/userapi/overseasv1/zai-oauth-login" {
+		t.Errorf("login path = %q, want zai endpoint", loginPath)
+	}
+	if _, err := st.Get("evmsnipe@gmail.com"); err != nil {
+		t.Errorf("account not persisted: %v", err)
 	}
 }
 
