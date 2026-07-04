@@ -13,7 +13,7 @@ async function req(path: string, init?: RequestInit): Promise<unknown> {
 interface RawAccount {
   email: string; user_id: string; status: Account["status"];
   access_expires_at: number; refresh_expires_at: number;
-  last_refreshed_at: number; added_at: number;
+  last_refreshed_at: number; added_at: number; balance: number;
 }
 
 export async function listAccounts(): Promise<Account[]> {
@@ -22,6 +22,7 @@ export async function listAccounts(): Promise<Account[]> {
     email: a.email, userId: a.user_id, status: a.status,
     accessExpiresAt: a.access_expires_at, refreshExpiresAt: a.refresh_expires_at,
     lastRefreshedAt: a.last_refreshed_at, addedAt: a.added_at,
+    balance: a.balance ?? 0,
   }));
 }
 

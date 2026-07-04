@@ -8,6 +8,7 @@
 /gogoclaw
 /gogoclaw.exe
 *.exe
+*.exe~
 *.test
 *.out
 

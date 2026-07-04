@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -129,6 +130,14 @@ func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) err
 	if err := e.store.Add(acct); err != nil {
 		e.fail(state, fmt.Errorf("store account: %w", err))
 		return err
+	}
+	// Best-effort: seed the credit balance now so it shows immediately, rather
+	// than staying 0 until the background refresher first runs. A failure here
+	// must not fail an otherwise-successful login.
+	if w, err := e.api.Wallets(ctx, res.AccessToken); err != nil {
+		log.Printf("balance %s: %v", claims.Email, err)
+	} else if err := e.store.UpdateBalance(claims.Email, w.TotalBalance); err != nil {
+		log.Printf("balance %s: store: %v", claims.Email, err)
 	}
 
 	e.mu.Lock()

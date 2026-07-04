@@ -13,12 +13,14 @@ test("listAccounts maps snake_case fields to the Account shape", async () => {
   mockFetch(200, [{
     email: "a@x.com", user_id: "u1", status: "active",
     access_expires_at: 111, refresh_expires_at: 222, last_refreshed_at: 333, added_at: 444,
+    balance: 2300,
   }]);
   const accts = await listAccounts();
   expect(accts).toHaveLength(1);
   expect(accts[0]).toEqual({
     email: "a@x.com", userId: "u1", status: "active",
     accessExpiresAt: 111, refreshExpiresAt: 222, lastRefreshedAt: 333, addedAt: 444,
+    balance: 2300,
   });
 });
 

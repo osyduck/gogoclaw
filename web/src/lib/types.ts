@@ -8,6 +8,7 @@ export interface Account {
   refreshExpiresAt: number;
   lastRefreshedAt: number;
   addedAt: number;
+  balance: number;
 }
 
 export interface LoginStart {

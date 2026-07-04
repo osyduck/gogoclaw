@@ -22,6 +22,10 @@ export function AccountsTable({ accounts, onRefresh, onDelete, busyEmail }: Prop
   const columns = [
     col.accessor("email", { header: "Email", cell: (c) => <span className="font-medium">{c.getValue()}</span> }),
     col.accessor("status", { header: "Status", cell: (c) => <StatusBadge status={c.getValue()} /> }),
+    col.accessor("balance", {
+      header: "Credit",
+      cell: (c) => <span className="tabular-nums">{c.getValue().toLocaleString("en-US")}</span>,
+    }),
     col.accessor("accessExpiresAt", { header: "Access expiry", cell: (c) => <Expiry at={c.getValue()} /> }),
     col.accessor("lastRefreshedAt", { header: "Last refresh", cell: (c) => <Ago at={c.getValue()} /> }),
     col.display({

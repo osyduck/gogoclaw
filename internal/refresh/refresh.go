@@ -92,8 +92,22 @@ func (r *Refresher) RefreshOne(ctx context.Context, email string) error {
 	if err := r.store.UpdateTokens(email, newAccess, newRefresh, time.Unix(ac.Exp, 0), time.Unix(rc.Exp, 0)); err != nil {
 		return err
 	}
+	r.syncBalance(ctx, email, newAccess)
 	r.bus.Publish(events.Event{Type: "refresh:ok", Email: email})
 	return nil
+}
+
+// syncBalance best-effort fetches the account's AutoClaw credit and stores it.
+// A failure here must not fail the refresh itself, so it only logs.
+func (r *Refresher) syncBalance(ctx context.Context, email, accessToken string) {
+	w, err := r.api.Wallets(ctx, accessToken)
+	if err != nil {
+		log.Printf("balance %s: %v", email, err)
+		return
+	}
+	if err := r.store.UpdateBalance(email, w.TotalBalance); err != nil {
+		log.Printf("balance %s: store: %v", email, err)
+	}
 }
 
 // RefreshAll refreshes every stored account regardless of expiry.

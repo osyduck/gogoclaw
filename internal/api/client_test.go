@@ -147,6 +147,35 @@ func TestRefresh_KeepsOldRefreshTokenWhenResponseEmpty(t *testing.T) {
 	}
 }
 
+func TestWallets(t *testing.T) {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
+		if path != "/agent-assetmgr/api/v2/wallets" {
+			t.Errorf("path = %s", path)
+		}
+		if auth != "Bearer aaa" {
+			t.Errorf("authorization = %q, want %q", auth, "Bearer aaa")
+		}
+		return map[string]any{
+			"total_balance": 2300,
+			"wallets": []any{
+				map[string]any{"public_wallet_type": "reward", "display_name": "Reward Points", "balance": 2300, "display": true},
+				map[string]any{"public_wallet_type": "daily", "display_name": "Daily Points", "balance": 0, "display": false},
+			},
+		}
+	})
+	defer done()
+	w, err := c.Wallets(context.Background(), "Bearer aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.TotalBalance != 2300 {
+		t.Errorf("total = %d, want 2300", w.TotalBalance)
+	}
+	if len(w.Wallets) != 2 || w.Wallets[0].Type != "reward" || w.Wallets[0].Balance != 2300 {
+		t.Errorf("wallets = %+v", w.Wallets)
+	}
+}
+
 func TestUserProfile(t *testing.T) {
 	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/v1/user-profile" {

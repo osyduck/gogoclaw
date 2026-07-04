@@ -26,8 +26,16 @@ CREATE TABLE IF NOT EXISTS accounts (
   pub_pem           TEXT NOT NULL,
   added_at          INTEGER NOT NULL,
   last_refreshed_at INTEGER NOT NULL,
-  status            TEXT NOT NULL
+  status            TEXT NOT NULL,
+  balance           INTEGER NOT NULL DEFAULT 0
 );`
+
+// migrations are additive schema changes applied to databases created by
+// earlier versions. Each ADD COLUMN on an already-migrated table errors with
+// "duplicate column name", which we treat as already-applied (idempotent).
+var migrations = []string{
+	`ALTER TABLE accounts ADD COLUMN balance INTEGER NOT NULL DEFAULT 0`,
+}
 
 // SQLiteStore is a pure-Go SQLite-backed Store.
 type SQLiteStore struct{ db *sql.DB }
@@ -53,6 +61,12 @@ func Open(path string) (*SQLiteStore, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
+	}
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, err
+		}
 	}
 	return &SQLiteStore{db: db}, nil
 }
@@ -80,7 +94,7 @@ func scanAccount(sc interface{ Scan(...any) error }) (Account, error) {
 	var a Account
 	var aexp, rexp, added, refreshed int64
 	err := sc.Scan(&a.Email, &a.UserID, &a.DeviceID, &a.AccessToken, &a.RefreshToken,
-		&aexp, &rexp, &a.PrivPEM, &a.PubPEM, &added, &refreshed, &a.Status)
+		&aexp, &rexp, &a.PrivPEM, &a.PubPEM, &added, &refreshed, &a.Status, &a.Balance)
 	if err != nil {
 		return Account{}, err
 	}
@@ -92,7 +106,7 @@ func scanAccount(sc interface{ Scan(...any) error }) (Account, error) {
 }
 
 const selectCols = `email,user_id,device_id,access_token,refresh_token,
-  access_expires_at,refresh_expires_at,priv_pem,pub_pem,added_at,last_refreshed_at,status`
+  access_expires_at,refresh_expires_at,priv_pem,pub_pem,added_at,last_refreshed_at,status,balance`
 
 func (s *SQLiteStore) Get(email string) (Account, error) {
 	row := s.db.QueryRow(`SELECT `+selectCols+` FROM accounts WHERE email=?`, email)
@@ -132,6 +146,14 @@ func (s *SQLiteStore) UpdateTokens(email, access, refresh string, aexp, rexp tim
 
 func (s *SQLiteStore) SetStatus(email, status string) error {
 	res, err := s.db.Exec(`UPDATE accounts SET status=? WHERE email=?`, status, email)
+	if err != nil {
+		return err
+	}
+	return mustAffect(res, email)
+}
+
+func (s *SQLiteStore) UpdateBalance(email string, balance int) error {
+	res, err := s.db.Exec(`UPDATE accounts SET balance=? WHERE email=?`, balance, email)
 	if err != nil {
 		return err
 	}

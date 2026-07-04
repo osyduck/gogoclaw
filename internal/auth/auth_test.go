@@ -59,6 +59,8 @@ func TestHandleCallback_PersistsAccount(t *testing.T) {
 			data = map[string]any{"oauth_url": "u", "state": "st-2"}
 		case "/userapi/overseasv1/google-oauth-login":
 			data = map[string]any{"access_token": jwtA, "refresh_token": jwtA, "user_id": "hexid", "user_name": "EVM"}
+		case "/agent-assetmgr/api/v2/wallets":
+			data = map[string]any{"total_balance": 1500}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
 	})
@@ -74,6 +76,9 @@ func TestHandleCallback_PersistsAccount(t *testing.T) {
 	}
 	if acct.AccessToken != jwtA || acct.Status != store.StatusActive || acct.DeviceID == "" {
 		t.Errorf("acct = %+v", acct)
+	}
+	if acct.Balance != 1500 {
+		t.Errorf("balance = %d, want 1500 seeded on login", acct.Balance)
 	}
 	if s, _ := e.Status("st-2"); s.Status != "ok" || s.Email != "evmsnipe@gmail.com" {
 		t.Errorf("session = %+v", s)

@@ -117,6 +117,7 @@ type accountView struct {
 	RefreshExpiresAt int64  `json:"refresh_expires_at"`
 	LastRefreshedAt  int64  `json:"last_refreshed_at"`
 	AddedAt          int64  `json:"added_at"`
+	Balance          int    `json:"balance"`
 }
 
 func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +132,7 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 			Email: a.Email, UserID: a.UserID, Status: a.Status,
 			AccessExpiresAt: unixOrZero(a.AccessExpiresAt), RefreshExpiresAt: unixOrZero(a.RefreshExpiresAt),
 			LastRefreshedAt: unixOrZero(a.LastRefreshedAt), AddedAt: unixOrZero(a.AddedAt),
+			Balance: a.Balance,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

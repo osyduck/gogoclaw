@@ -47,9 +47,15 @@ func newRefresher(t *testing.T, h http.HandlerFunc) (*Refresher, store.Store) {
 }
 
 func TestRefreshOne_Success(t *testing.T) {
-	r, st := newRefresher(t, func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
-			"data": map[string]any{"access_token": jwtNew, "refresh_token": jwtNew}})
+	r, st := newRefresher(t, func(w http.ResponseWriter, req *http.Request) {
+		var data map[string]any
+		switch req.URL.Path {
+		case "/userapi/v1/refresh":
+			data = map[string]any{"access_token": jwtNew, "refresh_token": jwtNew}
+		case "/agent-assetmgr/api/v2/wallets":
+			data = map[string]any{"total_balance": 2300}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
 	})
 	seed(t, st, time.Now().Add(time.Hour))
 	if err := r.RefreshOne(context.Background(), "a@example.com"); err != nil {
@@ -61,6 +67,31 @@ func TestRefreshOne_Success(t *testing.T) {
 	}
 	if acct.AccessExpiresAt.Unix() != 1799999999 {
 		t.Errorf("aexp = %d", acct.AccessExpiresAt.Unix())
+	}
+	if acct.Balance != 2300 {
+		t.Errorf("balance = %d, want 2300 synced after refresh", acct.Balance)
+	}
+}
+
+// TestRefreshOne_SucceedsWhenBalanceFetchFails guards that a failing wallets
+// call (best-effort) does not fail an otherwise-successful token refresh.
+func TestRefreshOne_SucceedsWhenBalanceFetchFails(t *testing.T) {
+	r, st := newRefresher(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/agent-assetmgr/api/v2/wallets" {
+			w.WriteHeader(500)
+			_, _ = w.Write([]byte("boom"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"access_token": jwtNew, "refresh_token": jwtNew}})
+	})
+	seed(t, st, time.Now().Add(time.Hour))
+	if err := r.RefreshOne(context.Background(), "a@example.com"); err != nil {
+		t.Fatalf("refresh should succeed despite balance failure: %v", err)
+	}
+	acct, _ := st.Get("a@example.com")
+	if acct.Status != store.StatusActive || acct.AccessToken != jwtNew {
+		t.Errorf("acct = %+v", acct)
 	}
 }
 
@@ -95,8 +126,12 @@ func TestRefreshOne_TransientMarksRefreshFailed(t *testing.T) {
 
 func TestRefreshDue_OnlyRefreshesExpiring(t *testing.T) {
 	calls := 0
-	r, st := newRefresher(t, func(w http.ResponseWriter, _ *http.Request) {
-		calls++
+	r, st := newRefresher(t, func(w http.ResponseWriter, req *http.Request) {
+		// Count only token-refresh hits; a successful refresh also does a
+		// best-effort wallets GET, which is not what this test is measuring.
+		if req.URL.Path == "/userapi/v1/refresh" {
+			calls++
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
 			"data": map[string]any{"access_token": jwtNew, "refresh_token": jwtNew}})
 	})

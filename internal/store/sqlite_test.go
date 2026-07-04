@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -75,6 +76,88 @@ func TestUpdateTokensAndStatus(t *testing.T) {
 	got, _ := s.Get("a@example.com")
 	if got.AccessToken != "Bearer na" || got.Status != StatusNeedsRelogin {
 		t.Errorf("got = %+v", got)
+	}
+}
+
+func TestUpdateBalance(t *testing.T) {
+	s := newTestStore(t)
+	_ = s.Add(sampleAccount())
+	// A freshly added account defaults to zero credit.
+	if got, _ := s.Get("a@example.com"); got.Balance != 0 {
+		t.Errorf("initial balance = %d, want 0", got.Balance)
+	}
+	if err := s.UpdateBalance("a@example.com", 2300); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get("a@example.com")
+	if got.Balance != 2300 {
+		t.Errorf("balance = %d, want 2300", got.Balance)
+	}
+	if err := s.UpdateBalance("missing@example.com", 5); !errors.Is(err, ErrNotFound) {
+		t.Errorf("UpdateBalance missing: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestAdd_PreservesBalanceOnReLogin guards that re-adding an account (the
+// upsert path taken on re-login) does not reset its stored credit to zero.
+func TestAdd_PreservesBalanceOnReLogin(t *testing.T) {
+	s := newTestStore(t)
+	a := sampleAccount()
+	_ = s.Add(a)
+	_ = s.UpdateBalance(a.Email, 999)
+	a.AccessToken = "Bearer new-token"
+	if err := s.Add(a); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(a.Email)
+	if got.Balance != 999 {
+		t.Errorf("balance = %d, want preserved 999", got.Balance)
+	}
+	if got.AccessToken != "Bearer new-token" {
+		t.Errorf("token not updated on re-login: %s", got.AccessToken)
+	}
+}
+
+// TestOpen_MigratesLegacyDBWithoutBalanceColumn opens a database created by a
+// pre-credit build (no balance column) and verifies Open adds the column
+// idempotently rather than failing on the missing/duplicate column.
+func TestOpen_MigratesLegacyDBWithoutBalanceColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE accounts (
+	  email TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
+	  access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
+	  access_expires_at INTEGER NOT NULL, refresh_expires_at INTEGER NOT NULL,
+	  priv_pem TEXT NOT NULL, pub_pem TEXT NOT NULL,
+	  added_at INTEGER NOT NULL, last_refreshed_at INTEGER NOT NULL, status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO accounts VALUES
+	  ('old@x.com','u','d','a','r',1,2,'p','P',3,4,'active')`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open legacy db: %v", err)
+	}
+	defer s.Close()
+	got, err := s.Get("old@x.com")
+	if err != nil {
+		t.Fatalf("Get after migration: %v", err)
+	}
+	if got.Balance != 0 {
+		t.Errorf("legacy balance = %d, want 0 default", got.Balance)
+	}
+	if err := s.UpdateBalance("old@x.com", 42); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Get("old@x.com"); got.Balance != 42 {
+		t.Errorf("balance after update = %d, want 42", got.Balance)
 	}
 }
 
