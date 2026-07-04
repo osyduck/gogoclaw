@@ -19,3 +19,13 @@ test("formatExpiry shows 'expired' in the past", () => {
 test("formatExpiry shows an em dash for a zero timestamp", () => {
   expect(formatExpiry(0, 1_000_000)).toBe("—");
 });
+
+test("formatExpiry shows 'expired' at exactly zero delta", () => {
+  const now = 1_000_000;
+  expect(formatExpiry(now, now)).toBe("expired");
+});
+
+test("formatExpiry shows '1d 0h' at exactly 24 hours", () => {
+  const now = 1_000_000;
+  expect(formatExpiry(now + 24 * 3600, now)).toBe("1d 0h");
+});

@@ -25,3 +25,22 @@ test("clicking Refresh fires onRefresh with the row email", async () => {
   await userEvent.click(firstRowRefresh);
   expect(onRefresh).toHaveBeenCalledWith("a@x.com");
 });
+
+test("clicking Delete fires onDelete with the row email", async () => {
+  const onDelete = vi.fn();
+  render(<AccountsTable accounts={accts} onRefresh={() => {}} onDelete={onDelete} />);
+  const rows = screen.getAllByRole("row");
+  // header row + 2 data rows; click the first data row's Delete button
+  const firstRowDelete = within(rows[1]).getByRole("button", { name: /delete/i });
+  await userEvent.click(firstRowDelete);
+  expect(onDelete).toHaveBeenCalledWith("a@x.com");
+});
+
+test("busyEmail disables only the matching row's Refresh button", () => {
+  render(<AccountsTable accounts={accts} onRefresh={() => {}} onDelete={() => {}} busyEmail="a@x.com" />);
+  const rows = screen.getAllByRole("row");
+  const firstRowRefresh = within(rows[1]).getByRole("button", { name: /refresh/i });
+  const secondRowRefresh = within(rows[2]).getByRole("button", { name: /refresh/i });
+  expect(firstRowRefresh).toBeDisabled();
+  expect(secondRowRefresh).not.toBeDisabled();
+});
