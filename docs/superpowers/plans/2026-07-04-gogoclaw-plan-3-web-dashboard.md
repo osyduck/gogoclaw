@@ -68,14 +68,15 @@ Create `web/package.json`:
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^6",
-    "vitest": "^2"
+    "vitest": "^3"
   }
 }
 ```
+> Version note: `vitest` must be `^3` — vitest 2.x pins `vite ^5`, which installs a duplicate Vite and breaks typing of the `test` field against Vite 6. Vitest 3 officially supports Vite 6.
 
-Create `web/vite.config.ts`:
+Create `web/vite.config.ts` (import `defineConfig` from `vitest/config` so the `test` field is typed):
 ```ts
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -122,10 +123,11 @@ Create `web/tsconfig.json`:
 }
 ```
 
-Create `web/tsconfig.node.json`:
+Create `web/tsconfig.node.json` (`composite: true` is required for the project reference from `tsconfig.json`):
 ```json
 {
   "compilerOptions": {
+    "composite": true,
     "target": "ES2022",
     "lib": ["ES2023"],
     "module": "ESNext",
