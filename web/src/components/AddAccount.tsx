@@ -8,23 +8,28 @@ interface Props {
 
 export function AddAccount({ openUrl = (u) => window.open(u, "_blank", "noopener") }: Props) {
   const [phase, setPhase] = useState<"idle" | "waiting">("idle");
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function start() {
     setError(null);
+    setPhase("idle");
+    setStarting(true);
     try {
       const { oauthUrl } = await startManualLogin();
       openUrl(oauthUrl);
       setPhase("waiting");
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to start login");
+    } finally {
+      setStarting(false);
     }
   }
 
   return (
     <div className="flex items-center gap-3">
       <button
-        type="button" onClick={start} disabled={phase === "waiting"}
+        type="button" onClick={start} disabled={starting}
         className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-brand-ink hover:brightness-110 focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50"
       >
         <PlusIcon size={16} weight="bold" /> Add account

@@ -44,3 +44,16 @@ test("busyEmail disables only the matching row's Refresh button", () => {
   expect(firstRowRefresh).toBeDisabled();
   expect(secondRowRefresh).not.toBeDisabled();
 });
+
+test("Last refresh column shows an 'ago' value, not 'expired'", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const recent: Account[] = [
+    { email: "c@x.com", userId: "u3", status: "active", accessExpiresAt: 9_999_999_999, refreshExpiresAt: 9_999_999_999, lastRefreshedAt: now - 300, addedAt: 1 },
+  ];
+  render(<AccountsTable accounts={recent} onRefresh={() => {}} onDelete={() => {}} />);
+  const rows = screen.getAllByRole("row");
+  const cells = within(rows[1]).getAllByRole("cell");
+  const lastRefreshCell = cells[3];
+  expect(lastRefreshCell.textContent).toMatch(/ago|just now/);
+  expect(lastRefreshCell.textContent).not.toMatch(/expired/);
+});

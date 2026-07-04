@@ -22,3 +22,23 @@ test("clicking Add starts a login and opens the oauth url", async () => {
   await waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://g/o"));
   expect(screen.getByText(/waiting/i)).toBeInTheDocument();
 });
+
+test("the button stays enabled after a login completes, so a second account can be started", async () => {
+  const fetchMock = vi.fn(async () => new Response(
+    JSON.stringify({ state: "st1", oauth_url: "https://g/o" }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  const openUrl = vi.fn();
+  render(wrap(<AddAccount openUrl={openUrl} />));
+  const button = screen.getByRole("button", { name: /add account/i });
+
+  await userEvent.click(button);
+  await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(1));
+  expect(screen.getByText(/waiting/i)).toBeInTheDocument();
+  expect(button).not.toBeDisabled();
+
+  await userEvent.click(button);
+  await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(2));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});

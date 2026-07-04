@@ -57,7 +57,7 @@ function Dashboard() {
           <AccountsTable
             accounts={list}
             onRefresh={(email) => refreshOne.mutate(email)}
-            onDelete={(email) => del.mutate(email)}
+            onDelete={(email) => { if (window.confirm(`Delete ${email}?`)) del.mutate(email); }}
             busyEmail={refreshOne.isPending ? (refreshOne.variables as string) : undefined}
           />
         )}
