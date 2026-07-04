@@ -17,6 +17,7 @@ import (
 type GoogleCred struct {
 	Email    string
 	Password string
+	Proxy    string // optional residential proxy; empty = none
 }
 
 // LoginDriver drives the Google consent step for a login. Manual = no-op (the UI

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -34,7 +35,116 @@ func newServer(t *testing.T, autoglm http.HandlerFunc) (http.Handler, store.Stor
 	t.Cleanup(func() { st.Close() })
 	c := api.NewClientWithBase(srv.URL)
 	bus := events.New()
-	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus).Handler(), st
+	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, nil).Handler(), st
+}
+
+// fakeAutoLogin drives logins through a stub driver without a real sidecar.
+type fakeAutoLogin struct {
+	ensured bool
+	driver  auth.LoginDriver
+}
+
+func (f *fakeAutoLogin) Ensure(context.Context) error { f.ensured = true; return nil }
+func (f *fakeAutoLogin) Driver() auth.LoginDriver     { return f.driver }
+
+// stubDriver is a LoginDriver that succeeds immediately (no browser).
+type stubDriver struct{}
+
+func (stubDriver) Drive(context.Context, string, *auth.GoogleCred) error { return nil }
+
+func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) http.Handler {
+	srv := httptest.NewServer(autoglm)
+	t.Cleanup(srv.Close)
+	st, err := store.Open(t.TempDir() + "/t.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	c := api.NewClientWithBase(srv.URL)
+	bus := events.New()
+	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, al).Handler()
+}
+
+func TestLoginStart_AutoUsesSidecarWhenConfigured(t *testing.T) {
+	al := &fakeAutoLogin{driver: stubDriver{}}
+	h := newServerWithAuto(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"oauth_url": "u", "state": "st-a"}})
+	}, al)
+	rec := httptest.NewRecorder()
+	body := `{"mode":"auto","cred":{"Email":"a@x.com","Password":"pw"}}`
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/start", strings.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("code = %d body = %s", rec.Code, rec.Body)
+	}
+	if !al.ensured {
+		t.Error("Ensure was not called for auto login")
+	}
+}
+
+func TestBulkLogin_StartsEachAccount(t *testing.T) {
+	al := &fakeAutoLogin{driver: stubDriver{}}
+	var n int
+	h := newServerWithAuto(t, func(w http.ResponseWriter, r *http.Request) {
+		n++
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"oauth_url": "u", "state": "st-" + strings.Repeat("x", n)}})
+	}, al)
+	rec := httptest.NewRecorder()
+	body := `{"accounts":[{"email":"a@x.com","password":"p1"},{"email":"b@x.com","password":"p2"}]}`
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(body)))
+	if rec.Code != 200 {
+		t.Fatalf("code = %d body = %s", rec.Code, rec.Body)
+	}
+	var out struct {
+		Started []struct {
+			Email string `json:"email"`
+			State string `json:"state"`
+		} `json:"started"`
+		Errors []struct {
+			Email string `json:"email"`
+			Error string `json:"error"`
+		} `json:"errors"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Started) != 2 {
+		t.Errorf("started = %d, want 2 (%s)", len(out.Started), rec.Body)
+	}
+	if out.Errors == nil {
+		t.Errorf("errors decoded as nil, want empty non-nil slice (%s)", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"errors":[]`) {
+		t.Errorf("body = %s, want errors field to marshal as [] not null", rec.Body)
+	}
+}
+
+func TestBulkLogin_501WhenUnconfigured(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	body := `{"accounts":[{"email":"a@x.com","password":"p1"}]}`
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(body)))
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("code = %d, want 501 when auto-login unconfigured", rec.Code)
+	}
+}
+
+func TestBulkLogin_400OnEmptyAccounts(t *testing.T) {
+	al := &fakeAutoLogin{driver: stubDriver{}}
+	h := newServerWithAuto(t, func(w http.ResponseWriter, r *http.Request) {}, al)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(`{"accounts":[]}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400 for empty accounts", rec.Code)
+	}
+}
+
+func TestLoginStart_AutoStill501WhenUnconfigured(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/start", strings.NewReader(`{"mode":"auto"}`)))
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("code = %d, want 501 when auto-login unconfigured", rec.Code)
+	}
 }
 
 func TestLoginStart_ReturnsStateAndURL(t *testing.T) {

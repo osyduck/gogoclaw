@@ -15,7 +15,7 @@ func TestBuildHandler_ServesUIAndAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	h, refresher := buildHandler(st, api.NewClient(), events.New())
+	h, refresher := buildHandler(st, api.NewClient(), events.New(), nil)
 	if refresher == nil {
 		t.Fatal("refresher not built")
 	}
@@ -28,5 +28,16 @@ func TestBuildHandler_ServesUIAndAPI(t *testing.T) {
 	h.ServeHTTP(rec2, httptest.NewRequest("GET", "/api/accounts", nil))
 	if rec2.Code != 200 || rec2.Body.String() == "" {
 		t.Errorf("accounts route code = %d body = %s", rec2.Code, rec2.Body)
+	}
+}
+
+func TestPickPython(t *testing.T) {
+	canImport := func(p string) bool { return p == "good" }
+
+	if got := pickPython([]string{"", "bad", "good"}, canImport); got != "good" {
+		t.Errorf("pickPython = %q, want %q", got, "good")
+	}
+	if got := pickPython([]string{"", "bad", "worse"}, canImport); got != "" {
+		t.Errorf("pickPython = %q, want empty string", got)
 	}
 }
