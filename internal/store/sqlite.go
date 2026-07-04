@@ -2,12 +2,16 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound is returned when an account row does not exist.
+var ErrNotFound = errors.New("account not found")
 
 const schema = `
 CREATE TABLE IF NOT EXISTS accounts (
@@ -94,7 +98,7 @@ func (s *SQLiteStore) Get(email string) (Account, error) {
 	row := s.db.QueryRow(`SELECT `+selectCols+` FROM accounts WHERE email=?`, email)
 	a, err := scanAccount(row)
 	if err == sql.ErrNoRows {
-		return Account{}, fmt.Errorf("account %q not found", email)
+		return Account{}, fmt.Errorf("get %q: %w", email, ErrNotFound)
 	}
 	return a, err
 }
@@ -145,7 +149,7 @@ func mustAffect(res sql.Result, email string) error {
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("account %q not found", email)
+		return fmt.Errorf("%q: %w", email, ErrNotFound)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -24,5 +25,17 @@ func TestDecodeEnvelope_APIError(t *testing.T) {
 	err := decodeEnvelope(strings.NewReader(body), nil)
 	if err == nil || !strings.Contains(err.Error(), "40001") {
 		t.Errorf("expected error containing code, got %v", err)
+	}
+}
+
+func TestDecodeEnvelope_ReturnsTypedAPIError(t *testing.T) {
+	body := `{"code":40001,"msg":"bad request","data":null}`
+	err := decodeEnvelope(strings.NewReader(body), nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T (%v)", err, err)
+	}
+	if apiErr.Code != 40001 || apiErr.Msg != "bad request" {
+		t.Errorf("apiErr = %+v", apiErr)
 	}
 }
