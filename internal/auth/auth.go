@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -83,9 +84,25 @@ func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, cred *G
 func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) error {
 	e.mu.Lock()
 	sess, ok := e.pending[state]
+	var status, sessErr string
+	if ok {
+		status, sessErr = sess.Status, sess.Err
+	}
 	e.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("unknown login state %q", state)
+	}
+
+	// Idempotency guard: a reloaded/duplicate callback hit for a session that
+	// already reached a terminal state must not re-exchange the (now-consumed)
+	// OAuth code. Re-exchanging causes AutoGLM to reject the stale code, which
+	// would otherwise flip a successful session's status from "ok" to "error"
+	// and publish a spurious login:error event.
+	switch status {
+	case "ok":
+		return nil
+	case "error":
+		return errors.New(sessErr)
 	}
 
 	res, err := e.api.GoogleOAuthLogin(ctx, sess.identity.DeviceID, code, state)
