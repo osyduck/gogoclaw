@@ -22,17 +22,23 @@ func TestAggregateTextStream(t *testing.T) {
 	if agg.FinishReason != "stop" {
 		t.Fatalf("finish = %q", agg.FinishReason)
 	}
-	// OpenAI response shape.
+	// OpenAI response shape; the full upstream usage (incl. cached_tokens) survives.
 	oai := agg.openAIResponse("glm-5.2", 123)
 	b, _ := json.Marshal(oai)
 	if !strings.Contains(string(b), `"object":"chat.completion"`) {
 		t.Fatalf("oai response = %s", b)
 	}
-	// Anthropic response shape (end_turn, text block).
+	if !strings.Contains(string(b), `"cached_tokens":21184`) {
+		t.Fatalf("oai usage dropped cached_tokens: %s", b)
+	}
+	// Anthropic response shape (end_turn, text block, mapped cache_read tokens).
 	an := agg.anthropicResponse("auto")
 	b, _ = json.Marshal(an)
 	if !strings.Contains(string(b), `"stop_reason":"end_turn"`) || !strings.Contains(string(b), `"type":"text"`) {
 		t.Fatalf("anthropic response = %s", b)
+	}
+	if !strings.Contains(string(b), `"cache_read_input_tokens":21184`) {
+		t.Fatalf("anthropic usage dropped cache_read_input_tokens: %s", b)
 	}
 }
 

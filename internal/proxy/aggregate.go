@@ -17,6 +17,7 @@ type aggResult struct {
 	ToolCalls    []aggToolCall
 	FinishReason string
 	Usage        oaiUsage
+	RawUsage     json.RawMessage // full upstream usage (cached_tokens, cost, …)
 }
 
 type aggToolCall struct {
@@ -50,8 +51,9 @@ func aggregateOpenAIStream(r io.Reader) (aggResult, error) {
 		if chunk.ID != "" {
 			res.ID = chunk.ID
 		}
-		if chunk.Usage != nil {
-			res.Usage = *chunk.Usage
+		if u, ok := parseUsage(chunk.Usage); ok {
+			res.Usage = u
+			res.RawUsage = chunk.Usage
 		}
 		for _, ch := range chunk.Choices {
 			d := ch.Delta
@@ -120,15 +122,21 @@ func (a aggResult) openAIResponse(model string, created int64) map[string]any {
 	if id == "" {
 		id = "chatcmpl-" + uuid()
 	}
+	// Preserve the full upstream usage object (cached_tokens, reasoning_tokens,
+	// cost, …) verbatim; fall back to a minimal one only if it was absent.
+	var usage any = a.RawUsage
+	if len(a.RawUsage) == 0 {
+		usage = map[string]int{
+			"prompt_tokens": a.Usage.PromptTokens, "completion_tokens": a.Usage.CompletionTokens,
+			"total_tokens": a.Usage.PromptTokens + a.Usage.CompletionTokens,
+		}
+	}
 	return map[string]any{
 		"id": id, "object": "chat.completion", "created": created, "model": respModel,
 		"choices": []any{map[string]any{
 			"index": 0, "message": msg, "finish_reason": finish,
 		}},
-		"usage": map[string]int{
-			"prompt_tokens": a.Usage.PromptTokens, "completion_tokens": a.Usage.CompletionTokens,
-			"total_tokens": a.Usage.PromptTokens + a.Usage.CompletionTokens,
-		},
+		"usage": usage,
 	}
 }
 
@@ -164,9 +172,13 @@ func (a aggResult) anthropicResponse(model string) map[string]any {
 	if id == "" {
 		id = "msg_" + uuid()
 	}
+	usage := map[string]int{"input_tokens": a.Usage.PromptTokens, "output_tokens": a.Usage.CompletionTokens}
+	if c := a.Usage.PromptTokensDetails.CachedTokens; c > 0 {
+		usage["cache_read_input_tokens"] = c
+	}
 	return map[string]any{
 		"id": id, "type": "message", "role": "assistant", "model": model,
 		"content": content, "stop_reason": mapStopReason(a.FinishReason), "stop_sequence": nil,
-		"usage": map[string]int{"input_tokens": a.Usage.PromptTokens, "output_tokens": a.Usage.CompletionTokens},
+		"usage": usage,
 	}
 }

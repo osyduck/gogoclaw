@@ -12,9 +12,9 @@ import (
 // --- OpenAI streaming chunk shapes (subset) ---
 
 type oaiChunk struct {
-	ID      string      `json:"id"`
-	Choices []oaiChoice `json:"choices"`
-	Usage   *oaiUsage   `json:"usage"`
+	ID      string          `json:"id"`
+	Choices []oaiChoice     `json:"choices"`
+	Usage   json.RawMessage `json:"usage"` // kept raw to preserve cached_tokens etc.
 }
 
 type oaiChoice struct {
@@ -39,8 +39,23 @@ type oaiToolCallDelta struct {
 }
 
 type oaiUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+// parseUsage decodes a raw upstream usage object, reporting whether it was present.
+func parseUsage(raw json.RawMessage) (oaiUsage, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return oaiUsage{}, false
+	}
+	var u oaiUsage
+	if json.Unmarshal(raw, &u) != nil {
+		return oaiUsage{}, false
+	}
+	return u, true
 }
 
 // blockKind is the currently-open Anthropic content block type.
@@ -152,8 +167,8 @@ func translateOpenAIStream(w io.Writer, flush func(), r io.Reader, model string)
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue // skip malformed chunk
 		}
-		if chunk.Usage != nil {
-			s.usage = *chunk.Usage
+		if u, ok := parseUsage(chunk.Usage); ok {
+			s.usage = u
 		}
 		for _, ch := range chunk.Choices {
 			s.applyDelta(ch.Delta)
@@ -167,10 +182,17 @@ func translateOpenAIStream(w io.Writer, flush func(), r io.Reader, model string)
 	}
 
 	s.closeBlock()
+	usage := map[string]int{
+		"input_tokens":  s.usage.PromptTokens,
+		"output_tokens": s.usage.CompletionTokens,
+	}
+	if c := s.usage.PromptTokensDetails.CachedTokens; c > 0 {
+		usage["cache_read_input_tokens"] = c
+	}
 	s.emit("message_delta", map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": s.stopReason, "stop_sequence": nil},
-		"usage": map[string]int{"output_tokens": s.usage.CompletionTokens},
+		"usage": usage,
 	})
 	s.emit("message_stop", map[string]any{"type": "message_stop"})
 	return nil
