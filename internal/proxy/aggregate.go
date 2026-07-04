@@ -51,6 +51,9 @@ func aggregateOpenAIStream(r io.Reader) (aggResult, error) {
 		if chunk.ID != "" {
 			res.ID = chunk.ID
 		}
+		if chunk.Model != "" {
+			res.Model = chunk.Model
+		}
 		if u, ok := parseUsage(chunk.Usage); ok {
 			res.Usage = u
 			res.RawUsage = chunk.Usage
@@ -176,8 +179,12 @@ func (a aggResult) anthropicResponse(model string) map[string]any {
 	if c := a.Usage.PromptTokensDetails.CachedTokens; c > 0 {
 		usage["cache_read_input_tokens"] = c
 	}
+	respModel := a.Model
+	if respModel == "" {
+		respModel = model
+	}
 	return map[string]any{
-		"id": id, "type": "message", "role": "assistant", "model": model,
+		"id": id, "type": "message", "role": "assistant", "model": respModel,
 		"content": content, "stop_reason": mapStopReason(a.FinishReason), "stop_sequence": nil,
 		"usage": usage,
 	}

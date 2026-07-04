@@ -91,6 +91,7 @@ func TestChatCompletionsNonStreamingReturnsJSON(t *testing.T) {
 	}
 	var body struct {
 		Object  string `json:"object"`
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
@@ -103,6 +104,11 @@ func TestChatCompletionsNonStreamingReturnsJSON(t *testing.T) {
 	}
 	if body.Object != "chat.completion" || len(body.Choices) != 1 || body.Choices[0].Message.Content == "" {
 		t.Fatalf("aggregated body = %s", rr.Body.String())
+	}
+	// The upstream-served model must be reported, not the friendly alias.
+	// The text fixture (HAR entry 0) was served by "z-ai/glm-5.2-20260616".
+	if body.Model != "z-ai/glm-5.2-20260616" {
+		t.Fatalf("model = %q, want upstream-served model", body.Model)
 	}
 }
 

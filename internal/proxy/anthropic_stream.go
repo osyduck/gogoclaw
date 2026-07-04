@@ -13,6 +13,7 @@ import (
 
 type oaiChunk struct {
 	ID      string          `json:"id"`
+	Model   string          `json:"model"` // upstream-served model (e.g. deepseek-v4-pro)
 	Choices []oaiChoice     `json:"choices"`
 	Usage   json.RawMessage `json:"usage"` // kept raw to preserve cached_tokens etc.
 }
@@ -142,15 +143,27 @@ func (s *streamState) openToolBlock(idx int, id, name string) {
 func translateOpenAIStream(w io.Writer, flush func(), r io.Reader, model string) error {
 	s := &streamState{w: w, flush: flush, stopReason: "end_turn"}
 
-	// message_start
-	s.emit("message_start", map[string]any{
-		"type": "message_start",
-		"message": map[string]any{
-			"id": "msg_" + uuid(), "type": "message", "role": "assistant",
-			"model": model, "content": []any{}, "stop_reason": nil,
-			"usage": map[string]int{"input_tokens": 0, "output_tokens": 0},
-		},
-	})
+	// message_start is deferred until the first chunk so it can carry the actual
+	// upstream-served model (e.g. deepseek-v4-pro) rather than the friendly alias.
+	started := false
+	start := func(upstreamModel string) {
+		if started {
+			return
+		}
+		started = true
+		m := upstreamModel
+		if m == "" {
+			m = model
+		}
+		s.emit("message_start", map[string]any{
+			"type": "message_start",
+			"message": map[string]any{
+				"id": "msg_" + uuid(), "type": "message", "role": "assistant",
+				"model": m, "content": []any{}, "stop_reason": nil,
+				"usage": map[string]int{"input_tokens": 0, "output_tokens": 0},
+			},
+		})
+	}
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 8*1024*1024) // large SSE lines
@@ -167,6 +180,7 @@ func translateOpenAIStream(w io.Writer, flush func(), r io.Reader, model string)
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue // skip malformed chunk
 		}
+		start(chunk.Model)
 		if u, ok := parseUsage(chunk.Usage); ok {
 			s.usage = u
 		}
@@ -180,6 +194,7 @@ func translateOpenAIStream(w io.Writer, flush func(), r io.Reader, model string)
 	if err := sc.Err(); err != nil {
 		return err
 	}
+	start("") // ensure message_start was emitted even for an empty stream
 
 	s.closeBlock()
 	usage := map[string]int{
