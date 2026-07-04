@@ -100,6 +100,33 @@ func TestDeleteAccount(t *testing.T) {
 	}
 }
 
+func TestLoginStart_AutoReturns501(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/start", strings.NewReader(`{"mode":"auto"}`)))
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("auto mode: code = %d, want 501", rec.Code)
+	}
+}
+
+func TestRefreshOne_MissingAccountReturns404(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/accounts/ghost@x.com/refresh", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing account refresh: code = %d, want 404", rec.Code)
+	}
+}
+
+func TestLoginStatus_UnknownState(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/login/status?state=nope", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown state: code = %d, want 404", rec.Code)
+	}
+}
+
 func TestServesPlaceholderUI(t *testing.T) {
 	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
 	rec := httptest.NewRecorder()

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -105,16 +106,29 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 	for _, a := range accts {
 		out = append(out, accountView{
 			Email: a.Email, UserID: a.UserID, Status: a.Status,
-			AccessExpiresAt: a.AccessExpiresAt.Unix(), RefreshExpiresAt: a.RefreshExpiresAt.Unix(),
-			LastRefreshedAt: a.LastRefreshedAt.Unix(), AddedAt: a.AddedAt.Unix(),
+			AccessExpiresAt: unixOrZero(a.AccessExpiresAt), RefreshExpiresAt: unixOrZero(a.RefreshExpiresAt),
+			LastRefreshedAt: unixOrZero(a.LastRefreshedAt), AddedAt: unixOrZero(a.AddedAt),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
+// unixOrZero converts t to a Unix timestamp, returning 0 for the zero value
+// instead of the large negative number time.Time{}.Unix() would otherwise produce.
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
 func (s *Server) handleRefreshOne(w http.ResponseWriter, r *http.Request) {
 	email := r.PathValue("email")
 	if err := s.refresher.RefreshOne(r.Context(), email); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "account not found"})
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
