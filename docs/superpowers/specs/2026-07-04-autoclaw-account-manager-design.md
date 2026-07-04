@@ -251,9 +251,11 @@ return {"ok": True}
   gogoclaw → the existing callback listener exchanges + stores the token. The sidecar
   just reports success/failure (wrong password, 2FA challenge, captcha → `ok:false`).
 - Google credentials live only in the POST body → in-memory in the sidecar, never persisted.
-- Optional per-account **residential proxy** for stronger stealth (CloakBrowser supports it).
-- Lifecycle: gogoclaw may spawn the sidecar on demand (subprocess) or the user runs it;
-  the interface is decoupled either way.
+- Lifecycle: gogoclaw **auto-spawns** the sidecar as a subprocess **on demand** — the
+  first time a user triggers auto-login (spawn if not already running, reuse otherwise),
+  and terminates it on app shutdown. No manual start required.
+- Per-account **residential proxy** support is designed for but **deferred** (the
+  `proxy` field flows through the `/drive` contract now; UI wiring comes later).
 
 ## 5. Login flows
 
@@ -376,12 +378,17 @@ during implementation via the `impeccable` skill; this section fixes the directi
 binary + `accounts.db` at runtime. For the stealth auto-login path only:
 `pip install -r sidecar/requirements.txt` and run the sidecar (or let gogoclaw spawn it).
 
-## 11. Open questions / future
-- Encrypt `accounts.db` at rest?
-- Sidecar lifecycle: gogoclaw auto-spawns the Python sidecar (subprocess) vs. user runs
-  it manually — which is the default shipping behavior?
-- Proxy sourcing for bulk stealth: per-account proxy list in the UI, or a single shared
-  residential proxy? (No proxy is acceptable for small batches.)
-- Re-introduce the LLM proxy (chat completions, round-robin) as a follow-up project?
-- Gateway (openclaw WS) connectivity using the stored ed25519 identity?
-- Light theme variant for the dashboard?
+## 11. Decisions & deferred
+
+**Locked:**
+- Sidecar **auto-spawned on demand** by gogoclaw when auto-login is triggered (§4.7).
+- `accounts.db` **not encrypted** for now (loopback-only, user-local; revisit later).
+
+**Deferred (designed for, not built yet):**
+- Proxy: `proxy` flows through the `/drive` contract; UI/sourcing wired later.
+
+**Future / out of scope:**
+- Re-introduce the LLM proxy (chat completions, round-robin) as a follow-up project.
+- Gateway (openclaw WS) connectivity using the stored ed25519 identity.
+- Light theme variant for the dashboard.
+- Encryption-at-rest for `accounts.db`.
