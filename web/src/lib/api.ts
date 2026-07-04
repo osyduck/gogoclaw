@@ -1,4 +1,4 @@
-import type { Account, LoginSession, LoginStart } from "./types";
+import type { Account, LoginSession, LoginStart, Provider } from "./types";
 
 async function req(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(path, init);
@@ -26,10 +26,10 @@ export async function listAccounts(): Promise<Account[]> {
   }));
 }
 
-export async function startManualLogin(): Promise<LoginStart> {
+export async function startManualLogin(provider: Provider = "google"): Promise<LoginStart> {
   const r = (await req("/api/login/start", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ mode: "manual" }),
+    body: JSON.stringify({ mode: "manual", provider }),
   })) as { state: string; oauth_url: string };
   return { state: r.state, oauthUrl: r.oauth_url };
 }
@@ -57,10 +57,11 @@ export interface BulkResult {
 
 export async function bulkLogin(
   creds: { email: string; password: string }[],
+  provider: Provider = "google",
 ): Promise<BulkResult> {
   return (await req("/api/login/bulk", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ accounts: creds }),
+    body: JSON.stringify({ accounts: creds, provider }),
   })) as BulkResult;
 }

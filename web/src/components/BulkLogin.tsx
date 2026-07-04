@@ -1,6 +1,7 @@
 import { CheckCircleIcon, CircleNotchIcon, ClockIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { bulkLogin, loginStatus } from "../lib/api";
+import type { Provider } from "../lib/types";
 
 // parseCreds turns "email:password" lines into credential objects, skipping blanks.
 export function parseCreds(text: string): { email: string; password: string }[] {
@@ -32,6 +33,7 @@ interface Props {
 
 export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props) {
   const [text, setText] = useState("");
+  const [provider, setProvider] = useState<Provider>("google");
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
     }
     setBusy(true);
     try {
-      const res = await bulkLogin(creds);
+      const res = await bulkLogin(creds, provider);
       startedAt.current = Date.now();
       setRows([
         ...res.started.map((s): Row => ({ email: s.email, state: s.state, status: "pending" })),
@@ -123,6 +125,17 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
           placeholder={"you@gmail.com:password\n…"}
         />
         <p className="mt-2 text-xs text-muted">Credentials are used once for sign-in and never stored.</p>
+
+        <fieldset className="mt-3 flex gap-4 text-sm">
+          <legend className="sr-only">Login provider</legend>
+          {([["google", "Direct Google"], ["zai", "via chat.z.ai"]] as [Provider, string][]).map(([val, label]) => (
+            <label key={val} className="inline-flex items-center gap-2 text-muted">
+              <input type="radio" name="provider" value={val}
+                checked={provider === val} onChange={() => setProvider(val)} />
+              {label}
+            </label>
+          ))}
+        </fieldset>
 
         {error && <p className="mt-3 text-sm text-err">{error}</p>}
 

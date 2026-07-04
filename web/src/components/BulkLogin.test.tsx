@@ -75,6 +75,21 @@ test("shows a server-rejected account as failed without polling it", async () =>
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+test("defaults to Direct Google and can switch to via chat.z.ai", async () => {
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => new Response(
+    JSON.stringify(url === "/api/login/bulk" ? { started: [], errors: [] } : {}),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<BulkLogin onClose={() => {}} pollMs={10} />);
+  await userEvent.type(screen.getByLabelText(/credentials/i), "a@x.com:pw");
+  await userEvent.click(screen.getByRole("radio", { name: /chat\.z\.ai/i }));
+  await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.anything()));
+  const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  expect(body.provider).toBe("zai");
+});
+
 test("surfaces a helpful hint when auto-login is not configured", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(
     JSON.stringify({ error: "auto login not configured" }),

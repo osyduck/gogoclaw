@@ -1,5 +1,7 @@
 export type AccountStatus = "active" | "refresh_failed" | "needs_relogin";
 
+export type Provider = "google" | "zai";
+
 export interface Account {
   email: string;
   userId: string;
