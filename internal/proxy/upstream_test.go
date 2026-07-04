@@ -45,8 +45,10 @@ func TestDoSetsUpstreamHeaders(t *testing.T) {
 	defer srv.Close()
 
 	f := NewForwarder(srv.URL)
+	// Stored access tokens already carry the "Bearer " prefix (codebase
+	// convention: the api client sets authorization to the raw stored value).
 	resp, err := f.Do(context.Background(),
-		store.Account{Email: "a@x.com", AccessToken: "JWT123"},
+		store.Account{Email: "a@x.com", AccessToken: "Bearer JWT123"},
 		"openrouter_glm-5.2", []byte(`{"model":"glm-5.2"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +57,7 @@ func TestDoSetsUpstreamHeaders(t *testing.T) {
 	if gotInternal != "Bearer autoclaw-internal-proxy" {
 		t.Errorf("internal auth = %q", gotInternal)
 	}
-	if gotXAuth != "Bearer JWT123" {
+	if gotXAuth != "Bearer JWT123" { // no double "Bearer "
 		t.Errorf("x-authorization = %q", gotXAuth)
 	}
 	if gotModel != "openrouter_glm-5.2" {

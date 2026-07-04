@@ -58,7 +58,9 @@ func (f *Forwarder) Do(ctx context.Context, acct store.Account, prefixedModel st
 	h.Set("content-type", "application/json")
 	h.Set("accept", "application/json")
 	h.Set("authorization", internalBearer)
-	h.Set("X-Authorization", "Bearer "+acct.AccessToken)
+	// AccessToken is stored with its "Bearer " prefix already (codebase
+	// convention), so set X-Authorization to the raw value — no extra prefix.
+	h.Set("X-Authorization", acct.AccessToken)
 	h.Set("X-Request-Model", prefixedModel)
 	h.Set("x_trace_id", "autoclaw-desktop")
 	h.Set("X-Version", api.Version)
