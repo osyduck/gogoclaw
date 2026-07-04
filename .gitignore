@@ -19,3 +19,12 @@ accounts.db
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Frontend deps
+web/node_modules/
+
+# tsc -b project-reference build artifacts (tsconfig.node.json has no
+# emit target for vite.config.ts; TS emits alongside the source instead)
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
