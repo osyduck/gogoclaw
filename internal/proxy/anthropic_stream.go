@@ -233,7 +233,7 @@ func (g *Gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "read body")
 		return
 	}
-	oaiBody, model, _, err := translateAnthropicRequest(raw)
+	oaiBody, model, clientStream, err := translateAnthropicRequest(raw)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -263,6 +263,16 @@ func (g *Gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if resp.StatusCode != http.StatusOK {
 		streamThrough(w, resp) // surface upstream error without translation
+		return
+	}
+	if !clientStream {
+		// Non-streaming client (generateText): aggregate into one Messages body.
+		agg, aerr := aggregateOpenAIStream(resp.Body)
+		if aerr != nil {
+			writeErr(w, http.StatusBadGateway, aerr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, agg.anthropicResponse(model))
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

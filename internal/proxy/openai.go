@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 )
 
 // handleChatCompletions implements POST /v1/chat/completions (OpenAI-compatible).
@@ -32,7 +33,12 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "unknown model: "+model)
 		return
 	}
+	// Whether the client wants a streamed response. The upstream is always
+	// streamed; a non-streaming client gets the SSE aggregated into one JSON body.
+	var clientStream bool
+	_ = json.Unmarshal(fields["stream"], &clientStream)
 	fields["model"], _ = json.Marshal(route.Bare)
+	fields["stream"], _ = json.Marshal(true) // always stream upstream
 	body, _ := json.Marshal(fields)
 
 	resp, _, err := g.fwd.Forward(r.Context(), g.sel, route.Prefixed(), body)
@@ -45,7 +51,17 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer resp.Body.Close()
-	streamThrough(w, resp)
+
+	if resp.StatusCode != http.StatusOK || clientStream {
+		streamThrough(w, resp) // stream (or surface an upstream error) verbatim
+		return
+	}
+	agg, err := aggregateOpenAIStream(resp.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agg.openAIResponse(model, time.Now().Unix()))
 }
 
 // streamThrough copies an upstream SSE response to the client, flushing per read
