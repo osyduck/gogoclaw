@@ -25,6 +25,13 @@ type Account struct {
 	Balance          int // AutoClaw credit (total_balance across wallets)
 }
 
+// ProxyConfig holds the LLM-gateway rotation settings (single row).
+type ProxyConfig struct {
+	Mode   string // "sticky" | "round_robin" | "rotate_after_n"
+	N      int    // request count per account for rotate_after_n
+	APIKey string // client key required on /v1/*; empty = open
+}
+
 // Store persists accounts.
 type Store interface {
 	Add(Account) error
@@ -34,4 +41,6 @@ type Store interface {
 	SetStatus(email, status string) error
 	UpdateBalance(email string, balance int) error
 	Delete(email string) error
+	GetProxyConfig() (ProxyConfig, error)
+	SetProxyConfig(ProxyConfig) error
 }

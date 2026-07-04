@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS accounts (
 // "duplicate column name", which we treat as already-applied (idempotent).
 var migrations = []string{
 	`ALTER TABLE accounts ADD COLUMN balance INTEGER NOT NULL DEFAULT 0`,
+	`CREATE TABLE IF NOT EXISTS proxy_settings (
+	  id      INTEGER PRIMARY KEY CHECK (id = 1),
+	  mode    TEXT NOT NULL,
+	  n       INTEGER NOT NULL,
+	  api_key TEXT NOT NULL
+	)`,
 }
 
 // SQLiteStore is a pure-Go SQLite-backed Store.
@@ -162,6 +168,27 @@ func (s *SQLiteStore) UpdateBalance(email string, balance int) error {
 
 func (s *SQLiteStore) Delete(email string) error {
 	_, err := s.db.Exec(`DELETE FROM accounts WHERE email=?`, email)
+	return err
+}
+
+func (s *SQLiteStore) GetProxyConfig() (ProxyConfig, error) {
+	row := s.db.QueryRow(`SELECT mode, n, api_key FROM proxy_settings WHERE id = 1`)
+	var c ProxyConfig
+	err := row.Scan(&c.Mode, &c.N, &c.APIKey)
+	if err == sql.ErrNoRows {
+		return ProxyConfig{Mode: "round_robin", N: 5, APIKey: ""}, nil
+	}
+	if err != nil {
+		return ProxyConfig{}, err
+	}
+	return c, nil
+}
+
+func (s *SQLiteStore) SetProxyConfig(c ProxyConfig) error {
+	_, err := s.db.Exec(`
+INSERT INTO proxy_settings (id, mode, n, api_key) VALUES (1, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET mode=excluded.mode, n=excluded.n, api_key=excluded.api_key`,
+		c.Mode, c.N, c.APIKey)
 	return err
 }
 
