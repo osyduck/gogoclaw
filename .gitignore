@@ -23,3 +23,6 @@ Thumbs.db
 # Frontend deps
 web/node_modules/
 
+# TypeScript incremental build cache (tsc -b emits these even with noEmit)
+*.tsbuildinfo
+
