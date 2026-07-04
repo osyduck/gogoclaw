@@ -70,8 +70,14 @@ func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, cred *G
 	if err != nil {
 		return "", "", fmt.Errorf("oauth url: %w", err)
 	}
+	sess := &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id}
+	if cred != nil {
+		// Auto/bulk logins know the target email up front; recording it lets the
+		// UI show per-account progress and lets failures be attributed to a row.
+		sess.Email = cred.Email
+	}
 	e.mu.Lock()
-	e.pending[state] = &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id}
+	e.pending[state] = sess
 	e.mu.Unlock()
 
 	go func() {
@@ -163,10 +169,12 @@ func (e *AuthEngine) Status(state string) (Session, bool) {
 
 func (e *AuthEngine) fail(state string, err error) {
 	e.mu.Lock()
+	var email string
 	if sess, ok := e.pending[state]; ok {
 		sess.Status = "error"
 		sess.Err = err.Error()
+		email = sess.Email
 	}
 	e.mu.Unlock()
-	e.bus.Publish(events.Event{Type: "login:error", Detail: err.Error()})
+	e.bus.Publish(events.Event{Type: "login:error", Email: email, Detail: err.Error()})
 }

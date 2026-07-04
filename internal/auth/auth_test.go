@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"gogoclaw/internal/api"
 	"gogoclaw/internal/events"
 	"gogoclaw/internal/store"
 )
+
+// failDriver simulates the stealth sidecar reporting a failed login.
+type failDriver struct{ err error }
+
+func (f failDriver) Drive(context.Context, string, *GoogleCred) error { return f.err }
 
 // tok builds a minimal unsigned JWT ("Bearer h.<payload>.s") whose payload decodes
 // to the given claims — so api.ParseClaims reads back exactly this jti/exp.
@@ -118,6 +125,45 @@ func TestHandleCallback_IdempotentOnReload(t *testing.T) {
 	}
 	if loginCalls != 1 {
 		t.Errorf("google-oauth-login called %d times, want 1", loginCalls)
+	}
+}
+
+// TestStartLogin_AutoFailureAttributesEmail guards that a driver (stealth
+// sidecar) failure marks the session as errored with the credential's email
+// AND publishes a login:error event carrying that email — so the bulk UI can
+// show which account failed and why, instead of an unattributed error.
+func TestStartLogin_AutoFailureAttributesEmail(t *testing.T) {
+	e, _ := newEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"oauth_url": "u", "state": "st-f"}})
+	})
+	ch, unsub := e.bus.Subscribe()
+	defer unsub()
+
+	cred := &GoogleCred{Email: "bulk@x.com", Password: "pw"}
+	state, _, err := e.StartLogin(context.Background(), failDriver{err: errors.New("stealth login failed: blocked")}, cred)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "login:error" || ev.Email != "bulk@x.com" {
+			t.Errorf("event = %+v, want login:error for bulk@x.com", ev)
+		}
+		if ev.Detail == "" {
+			t.Error("event detail (failure reason) is empty")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no login:error event published")
+	}
+
+	s, ok := e.Status(state)
+	if !ok || s.Status != "error" || s.Email != "bulk@x.com" {
+		t.Errorf("session = %+v ok=%v, want errored session for bulk@x.com", s, ok)
+	}
+	if s.Err == "" {
+		t.Error("session error reason is empty")
 	}
 }
 

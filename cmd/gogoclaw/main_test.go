@@ -31,13 +31,35 @@ func TestBuildHandler_ServesUIAndAPI(t *testing.T) {
 	}
 }
 
-func TestPickPython(t *testing.T) {
-	canImport := func(p string) bool { return p == "good" }
-
-	if got := pickPython([]string{"", "bad", "good"}, canImport); got != "good" {
-		t.Errorf("pickPython = %q, want %q", got, "good")
+func TestChoosePython(t *testing.T) {
+	// "full" has the whole stealth stack; "runner" can run the sidecar (aiohttp)
+	// but lacks cloakbrowser — the exact real-world mismatch (a stray venv on
+	// PATH) that made bulk logins fail with "No module named 'cloakbrowser'".
+	canImport := func(py, mod string) bool {
+		switch py {
+		case "full":
+			return mod == "cloakbrowser" || mod == "aiohttp"
+		case "runner":
+			return mod == "aiohttp"
+		default:
+			return false
+		}
 	}
-	if got := pickPython([]string{"", "bad", "worse"}, canImport); got != "" {
-		t.Errorf("pickPython = %q, want empty string", got)
+
+	// Prefers the cloakbrowser-capable interpreter even when a runner comes first.
+	if py, full := choosePython([]string{"", "runner", "full"}, canImport); py != "full" || !full {
+		t.Errorf("choosePython = (%q,%v), want (full,true)", py, full)
+	}
+	// Falls back to aiohttp-only so the sidecar still starts (full=false).
+	if py, full := choosePython([]string{"runner", "nope"}, canImport); py != "runner" || full {
+		t.Errorf("choosePython = (%q,%v), want (runner,false)", py, full)
+	}
+	// Nothing usable.
+	if py, full := choosePython([]string{"", "nope"}, canImport); py != "" || full {
+		t.Errorf("choosePython = (%q,%v), want empty", py, full)
+	}
+	// A repeated candidate is only considered once and doesn't disturb the result.
+	if py, _ := choosePython([]string{"runner", "runner", "full"}, canImport); py != "full" {
+		t.Errorf("choosePython dedupe = %q, want full", py)
 	}
 }
