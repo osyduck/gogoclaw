@@ -6,11 +6,11 @@
 
 **Architecture:** Pure Go library packages under `internal/`, each with one responsibility and its own tests. No HTTP server or UI yet (those are Plan 2+). The API client is stateless; the store wraps `modernc.org/sqlite` (pure Go, no cgo). Everything here is exercised by unit tests using verified `(timestamp, signature)` pairs and a real JWT from the captured HAR, plus `httptest` mocks and a temp-file SQLite DB.
 
-**Tech Stack:** Go 1.23+, stdlib (`crypto/md5`, `crypto/ed25519`, `crypto/sha256`, `crypto/rand`, `crypto/x509`, `encoding/pem`, `encoding/base64`, `encoding/json`, `net/http`, `database/sql`), `modernc.org/sqlite`.
+**Tech Stack:** Go 1.25+, stdlib (`crypto/md5`, `crypto/ed25519`, `crypto/sha256`, `crypto/rand`, `crypto/x509`, `encoding/pem`, `encoding/base64`, `encoding/json`, `net/http`, `database/sql`), `modernc.org/sqlite`.
 
 ## Global Constraints
 
-- Go module name: `gogoclaw`. Go version floor: `1.23`.
+- Go module name: `gogoclaw`. Go version floor: `1.25.0` (raised from 1.23 by decision — `modernc.org/sqlite` v1.53.0 requires Go ≥1.25.0; the module's `go` directive is `1.25.0`).
 - API base URL: `https://autoglm-api.autoglm.ai`.
 - Signing constants (verbatim): `APP_ID = "100003"`, `APP_KEY = "38d2391985e2369a5fb8227d8e6cd5e5"`.
 - `x-auth-sign = lowercasehex(MD5("<APP_ID>&<unix_seconds>&<APP_KEY>"))` — binds only appid+ts+key.
