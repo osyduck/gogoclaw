@@ -1,5 +1,7 @@
 export type AccountStatus = "active" | "refresh_failed" | "needs_relogin";
 
+export type Provider = "google" | "zai";
+
 export interface Account {
   email: string;
   userId: string;
@@ -21,6 +23,7 @@ export interface LoginSession {
   status: "pending" | "ok" | "error";
   email?: string;
   error?: string;
+  steps?: string[];
 }
 
 export interface GogoEvent {

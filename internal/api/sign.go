@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	BaseURL     = "https://autoglm-api.autoglm.ai"
-	SourceID    = "autoclaw"
-	NavigateURI = "http://localhost:18432/auth/callback-google"
+	BaseURL  = "https://autoglm-api.autoglm.ai"
+	SourceID = "autoclaw"
 
 	appID   = "100003"
 	appKey  = "38d2391985e2369a5fb8227d8e6cd5e5"

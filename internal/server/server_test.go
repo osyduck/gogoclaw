@@ -50,7 +50,9 @@ func (f *fakeAutoLogin) Driver() auth.LoginDriver     { return f.driver }
 // stubDriver is a LoginDriver that succeeds immediately (no browser).
 type stubDriver struct{}
 
-func (stubDriver) Drive(context.Context, string, *auth.GoogleCred) error { return nil }
+func (stubDriver) Drive(context.Context, api.Provider, string, *auth.GoogleCred, func(string)) error {
+	return nil
+}
 
 func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) http.Handler {
 	srv := httptest.NewServer(autoglm)
@@ -63,6 +65,30 @@ func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) htt
 	c := api.NewClientWithBase(srv.URL)
 	bus := events.New()
 	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, al).Handler()
+}
+
+func TestCallbackZaiRouteExists(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": map[string]any{}})
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/callback-zai?code=c&state=nope", nil))
+	// Unknown state → 400 (not 404): the route is wired to the callback handler.
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("callback-zai code = %d, want 400 (routed)", rec.Code)
+	}
+}
+
+func TestLoginStart_RejectsUnknownProvider(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": map[string]any{}})
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/login/start", strings.NewReader(`{"mode":"manual","provider":"evil"}`))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown provider code = %d, want 400", rec.Code)
+	}
 }
 
 func TestLoginStart_AutoUsesSidecarWhenConfigured(t *testing.T) {

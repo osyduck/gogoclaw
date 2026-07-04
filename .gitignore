@@ -4,6 +4,9 @@
 # Superpowers scratch (briefs, reports, review diffs, progress ledger)
 .superpowers/
 
+# Playwright MCP capture artifacts (page snapshots, console logs)
+.playwright-mcp/
+
 # Go build artifacts
 /gogoclaw
 /gogoclaw.exe

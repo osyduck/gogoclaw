@@ -56,6 +56,26 @@ test("posts creds, then polls each login to a terminal per-account status", asyn
   expect(screen.getByText(/1 failed/i)).toBeInTheDocument();
 });
 
+test("renders the sidecar's per-action steps as a live terminal", async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === "/api/login/bulk") return json({ started: [{ email: "a@x.com", state: "s1" }], errors: [] });
+    // status poll returns a step log plus the terminal outcome
+    return json({
+      state: "s1", status: "error", error: "stealth login failed: Timeout 30000ms exceeded",
+      steps: ["[  0.0s] launch stealth browser", "[  1.2s] enter email", "[ 33.0s] ERROR: Timeout 30000ms exceeded"],
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<BulkLogin onClose={() => {}} pollMs={10} />);
+  await userEvent.type(screen.getByLabelText(/credentials/i), "a@x.com:pw");
+  await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
+
+  await waitFor(() => expect(screen.getByText(/enter email/i)).toBeInTheDocument());
+  expect(screen.getByText(/launch stealth browser/i)).toBeInTheDocument();
+  expect(screen.getByText(/ERROR: Timeout/i)).toBeInTheDocument();
+});
+
 test("shows a server-rejected account as failed without polling it", async () => {
   const fetchMock = vi.fn(async (url: string) => {
     if (url === "/api/login/bulk") {
@@ -73,6 +93,21 @@ test("shows a server-rejected account as failed without polling it", async () =>
   expect(screen.getByText(/1 failed/i)).toBeInTheDocument();
   // Only the bulk POST is called; a row that never started is not polled.
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test("defaults to Direct Google and can switch to via chat.z.ai", async () => {
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => new Response(
+    JSON.stringify(url === "/api/login/bulk" ? { started: [], errors: [] } : {}),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<BulkLogin onClose={() => {}} pollMs={10} />);
+  await userEvent.type(screen.getByLabelText(/credentials/i), "a@x.com:pw");
+  await userEvent.click(screen.getByRole("radio", { name: /chat\.z\.ai/i }));
+  await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.anything()));
+  const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  expect(body.provider).toBe("zai");
 });
 
 test("surfaces a helpful hint when auto-login is not configured", async () => {

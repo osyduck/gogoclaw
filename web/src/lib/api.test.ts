@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { listAccounts, startManualLogin, refreshAccount, deleteAccount } from "./api";
+import { listAccounts, startManualLogin, refreshAccount, deleteAccount, bulkLogin } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -31,7 +31,7 @@ test("startManualLogin returns state + oauthUrl", async () => {
   expect(fetch).toHaveBeenCalledWith("/api/login/start", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ mode: "manual" }),
+    body: JSON.stringify({ mode: "manual", provider: "google" }),
   });
 });
 
@@ -50,4 +50,15 @@ test("deleteAccount URL-encodes the email path param", async () => {
   mockFetch(200, { status: "ok" });
   await deleteAccount("a+b@x.com");
   expect(fetch).toHaveBeenCalledWith("/api/accounts/a%2Bb%40x.com", { method: "DELETE" });
+});
+
+test("bulkLogin sends the selected provider", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+    JSON.stringify({ started: [], errors: [] }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  await bulkLogin([{ email: "a@x.com", password: "pw" }], "zai");
+  const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  expect(body.provider).toBe("zai");
 });
