@@ -123,19 +123,20 @@ Create `web/tsconfig.json`:
 }
 ```
 
-Create `web/tsconfig.node.json` (`composite: true` is required for the project reference from `tsconfig.json`):
+Create `web/tsconfig.node.json`. `composite: true` is required for the project reference from `tsconfig.json`; a composite project MUST emit (so `noEmit` is not allowed here — TS6310). Redirect the emit into `node_modules` so `tsc -b` never writes a `vite.config.js` next to `vite.config.ts` (Vite prefers `.js` over `.ts` and would silently load the stale compiled config):
 ```json
 {
   "compilerOptions": {
     "composite": true,
+    "outDir": "./node_modules/.cache/tsnode",
+    "tsBuildInfoFile": "./node_modules/.cache/tsnode/tsconfig.node.tsbuildinfo",
     "target": "ES2022",
     "lib": ["ES2023"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "noEmit": true
+    "strict": true
   },
   "include": ["vite.config.ts"]
 }
