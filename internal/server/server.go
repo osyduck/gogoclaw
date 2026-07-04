@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"gogoclaw/internal/api"
 	"gogoclaw/internal/auth"
 	"gogoclaw/internal/events"
 	"gogoclaw/internal/refresh"
@@ -39,6 +40,7 @@ func New(engine *auth.AuthEngine, refresher *refresh.Refresher, st store.Store, 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/callback-google", s.handleCallback)
+	mux.HandleFunc("GET /auth/callback-zai", s.handleCallback)
 	mux.HandleFunc("POST /api/login/start", s.handleLoginStart)
 	mux.HandleFunc("POST /api/login/bulk", s.handleBulkLogin)
 	mux.HandleFunc("GET /api/login/status", s.handleLoginStatus)
@@ -59,10 +61,16 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode string           `json:"mode"`
-		Cred *auth.GoogleCred `json:"cred"`
+		Mode     string           `json:"mode"`
+		Provider string           `json:"provider"`
+		Cred     *auth.GoogleCred `json:"cred"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	provider, err := api.ParseProvider(req.Provider)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	if req.Mode == "auto" {
 		if s.autoLogin == nil {
 			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "auto login not configured"})
@@ -72,7 +80,7 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		state, url, err := s.engine.StartLogin(r.Context(), s.autoLogin.Driver(), req.Cred)
+		state, url, err := s.engine.StartLogin(r.Context(), s.autoLogin.Driver(), provider, req.Cred)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
@@ -80,7 +88,7 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"state": state, "oauth_url": url})
 		return
 	}
-	state, url, err := s.engine.StartLogin(r.Context(), auth.ManualDriver{}, nil)
+	state, url, err := s.engine.StartLogin(r.Context(), auth.ManualDriver{}, provider, nil)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -217,10 +225,16 @@ func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		Provider string            `json:"provider"`
 		Accounts []auth.GoogleCred `json:"accounts"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Accounts) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected non-empty accounts array"})
+		return
+	}
+	provider, err := api.ParseProvider(req.Provider)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := s.autoLogin.Ensure(r.Context()); err != nil {
@@ -251,7 +265,7 @@ func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			state, _, err := s.engine.StartLogin(r.Context(), driver, &cred)
+			state, _, err := s.engine.StartLogin(r.Context(), driver, provider, &cred)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
