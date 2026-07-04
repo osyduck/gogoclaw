@@ -84,6 +84,19 @@ def test_drive_launcher_failure_returns_reason():
     assert "chromium launch failed" in result["reason"]
 
 
+def test_drive_normalizes_empty_proxy_to_none():
+    # The Go side always sends "proxy" (empty string when none); passing "" to
+    # cloakbrowser's launch makes Playwright reject it as an Invalid URL.
+    seen = {}
+
+    async def launcher(**kw):
+        seen.update(kw)
+        return FakeBrowser([])
+
+    asyncio.run(drive("u", "a@x.com", "pw", proxy="", launcher=launcher))
+    assert seen["proxy"] is None
+
+
 def test_drive_zai_clicks_google_then_authorizes():
     calls = []
     browser = FakeBrowser(calls)

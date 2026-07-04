@@ -64,7 +64,9 @@ async def drive(oauth_url, email, password, proxy=None, provider="google",
     {"ok": False, "reason": "..."}."""
     browser = None
     try:
-        browser = await launcher(headless=headless, humanize=True, proxy=proxy)
+        # An empty proxy string (the Go side always sends the field) must become
+        # None, else Playwright rejects it with "Invalid URL".
+        browser = await launcher(headless=headless, humanize=True, proxy=proxy or None)
         page = await browser.new_page()
         await page.goto(oauth_url)
         if provider == "zai":
