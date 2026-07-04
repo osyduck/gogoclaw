@@ -49,6 +49,9 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	if m.healthy(ctx) {
 		return nil
 	}
+	// Hold the lock across the spawn+poll (not just the spawn) so a second
+	// concurrent Ensure() blocks on the re-check below instead of racing to
+	// spawn its own sidecar process. The long hold is intentional.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.healthy(ctx) { // re-check under lock
@@ -65,12 +68,19 @@ func (m *Manager) Ensure(ctx context.Context) error {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			m.cmd = nil
+			return fmt.Errorf("sidecar startup canceled: %w", ctx.Err())
+		}
 		if m.healthy(ctx) {
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 	m.cmd = nil
 	return fmt.Errorf("sidecar did not become healthy at %s", m.addr)
 }
@@ -81,6 +91,7 @@ func (m *Manager) Stop() {
 	defer m.mu.Unlock()
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
 		m.cmd = nil
 	}
 }
