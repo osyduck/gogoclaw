@@ -5,8 +5,8 @@ import type { Account } from "../lib/types";
 import { AccountsTable } from "./AccountsTable";
 
 const accts: Account[] = [
-  { email: "a@x.com", userId: "u1", status: "active", accessExpiresAt: 9_999_999_999, refreshExpiresAt: 9_999_999_999, lastRefreshedAt: 1, addedAt: 1 },
-  { email: "b@x.com", userId: "u2", status: "needs_relogin", accessExpiresAt: 0, refreshExpiresAt: 0, lastRefreshedAt: 1, addedAt: 1 },
+  { email: "a@x.com", userId: "u1", status: "active", accessExpiresAt: 9_999_999_999, refreshExpiresAt: 9_999_999_999, lastRefreshedAt: 1, addedAt: 1, balance: 2300 },
+  { email: "b@x.com", userId: "u2", status: "needs_relogin", accessExpiresAt: 0, refreshExpiresAt: 0, lastRefreshedAt: 1, addedAt: 1, balance: 0 },
 ];
 
 test("renders a row per account with the email and status", () => {
@@ -14,6 +14,12 @@ test("renders a row per account with the email and status", () => {
   expect(screen.getByText("a@x.com")).toBeInTheDocument();
   expect(screen.getByText("b@x.com")).toBeInTheDocument();
   expect(screen.getByText(/needs re-?login/i)).toBeInTheDocument();
+});
+
+test("renders the credit balance, formatted with thousands separators", () => {
+  render(<AccountsTable accounts={accts} onRefresh={() => {}} onDelete={() => {}} />);
+  expect(screen.getByText("Credit")).toBeInTheDocument();
+  expect(screen.getByText("2,300")).toBeInTheDocument();
 });
 
 test("clicking Refresh fires onRefresh with the row email", async () => {
@@ -48,12 +54,13 @@ test("busyEmail disables only the matching row's Refresh button", () => {
 test("Last refresh column shows an 'ago' value, not 'expired'", () => {
   const now = Math.floor(Date.now() / 1000);
   const recent: Account[] = [
-    { email: "c@x.com", userId: "u3", status: "active", accessExpiresAt: 9_999_999_999, refreshExpiresAt: 9_999_999_999, lastRefreshedAt: now - 300, addedAt: 1 },
+    { email: "c@x.com", userId: "u3", status: "active", accessExpiresAt: 9_999_999_999, refreshExpiresAt: 9_999_999_999, lastRefreshedAt: now - 300, addedAt: 1, balance: 0 },
   ];
   render(<AccountsTable accounts={recent} onRefresh={() => {}} onDelete={() => {}} />);
   const rows = screen.getAllByRole("row");
   const cells = within(rows[1]).getAllByRole("cell");
-  const lastRefreshCell = cells[3];
+  // Columns: Email(0) Status(1) Credit(2) Access expiry(3) Last refresh(4) actions(5)
+  const lastRefreshCell = cells[4];
   expect(lastRefreshCell.textContent).toMatch(/ago|just now/);
   expect(lastRefreshCell.textContent).not.toMatch(/expired/);
 });

@@ -22,6 +22,7 @@ type Account struct {
 	AddedAt          time.Time
 	LastRefreshedAt  time.Time
 	Status           string
+	Balance          int // AutoClaw credit (total_balance across wallets)
 }
 
 // Store persists accounts.
@@ -31,5 +32,6 @@ type Store interface {
 	Get(email string) (Account, error)
 	UpdateTokens(email, access, refresh string, aexp, rexp time.Time) error
 	SetStatus(email, status string) error
+	UpdateBalance(email string, balance int) error
 	Delete(email string) error
 }

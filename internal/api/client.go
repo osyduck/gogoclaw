@@ -47,6 +47,27 @@ func (c *Client) postSigned(ctx context.Context, path string, body any, bearer s
 	return nil
 }
 
+// getSigned sends a signed GET to path with the bearer token and decodes data into out.
+func (c *Client) getSigned(ctx context.Context, path, bearer string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header = signHeaders(time.Now().Unix())
+	if bearer != "" {
+		req.Header.Set("authorization", bearer)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if err := decodeEnvelope(resp.Body, out); err != nil {
+		return fmt.Errorf("http %d: %w", resp.StatusCode, err)
+	}
+	return nil
+}
+
 type LoginResult struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -103,5 +124,27 @@ func (c *Client) UserProfile(ctx context.Context, deviceID, accessToken string) 
 	body := map[string]string{"source_id": SourceID, "device_id": deviceID}
 	var out Profile
 	err := c.postSigned(ctx, "/userapi/v1/user-profile", body, accessToken, &out)
+	return out, err
+}
+
+// Wallet is the AutoClaw credit balance for an account: a grand total plus a
+// per-type breakdown (reward / daily / subscription / fuel_pack / other).
+type Wallet struct {
+	TotalBalance int          `json:"total_balance"`
+	Wallets      []WalletLine `json:"wallets"`
+}
+
+// WalletLine is one credit bucket within a Wallet.
+type WalletLine struct {
+	Type        string `json:"public_wallet_type"`
+	DisplayName string `json:"display_name"`
+	Balance     int    `json:"balance"`
+	Display     bool   `json:"display"`
+}
+
+// Wallets fetches the credit balance for the bearer's account.
+func (c *Client) Wallets(ctx context.Context, accessToken string) (Wallet, error) {
+	var out Wallet
+	err := c.getSigned(ctx, "/agent-assetmgr/api/v2/wallets?biz_app_id="+SourceID, accessToken, &out)
 	return out, err
 }
