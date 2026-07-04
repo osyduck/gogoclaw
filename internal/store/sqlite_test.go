@@ -113,6 +113,51 @@ func TestUpdateTokens_ClearsFailedStatus(t *testing.T) {
 	}
 }
 
+// TestOpen_EnablesWALAndBusyTimeout guards against regressing the
+// concurrency-hardening DSN params: a background token refresher writes
+// concurrently with dashboard reads/login writes, and without WAL +
+// busy_timeout that produces intermittent SQLITE_BUSY errors.
+//
+// busy_timeout is a per-connection pragma (not persisted to the file), so
+// it must be read back on the store's own *sql.DB (same package, no public
+// accessor needed) rather than a freshly opened connection. journal_mode
+// is persisted in the database file header, so a second connection on the
+// same file would also observe "wal" — but we read both from the store's
+// own db for a single, unambiguous check of what Open actually configured.
+func TestOpen_EnablesWALAndBusyTimeout(t *testing.T) {
+	s := newTestStore(t)
+
+	var journalMode string
+	if err := s.db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if journalMode != "wal" {
+		t.Errorf("journal_mode = %q, want %q", journalMode, "wal")
+	}
+
+	var busyTimeout int
+	if err := s.db.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatalf("query busy_timeout: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Errorf("busy_timeout = %d, want %d", busyTimeout, 5000)
+	}
+}
+
+// TestOpen_MemoryDSNStillParses ensures the pragma DSN suffix doesn't break
+// opening a store whose path has no filesystem file (the driver strips the
+// "?..." suffix before opening regardless of the ":memory:" special path).
+func TestOpen_MemoryDSNStillParses(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open(:memory:): %v", err)
+	}
+	defer s.Close()
+	if err := s.Add(sampleAccount()); err != nil {
+		t.Fatalf("Add on in-memory store: %v", err)
+	}
+}
+
 func TestMissingEmail_ReturnsNotFoundError(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := s.Get("nope@example.com"); err == nil {

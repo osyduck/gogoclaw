@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -27,8 +28,21 @@ CREATE TABLE IF NOT EXISTS accounts (
 // SQLiteStore is a pure-Go SQLite-backed Store.
 type SQLiteStore struct{ db *sql.DB }
 
+// pragmaDSN appends the modernc.org/sqlite _pragma DSN params that enable
+// WAL journaling and a busy timeout, so concurrent readers/writers (e.g. a
+// background token refresher writing alongside dashboard reads) don't hit
+// SQLITE_BUSY instead of blocking briefly. Works for both file paths and
+// ":memory:" since the driver strips the "?..." suffix before opening.
+func pragmaDSN(path string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+}
+
 func Open(path string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", pragmaDSN(path))
 	if err != nil {
 		return nil, err
 	}
