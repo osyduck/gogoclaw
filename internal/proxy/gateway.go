@@ -121,15 +121,7 @@ func (g *Gateway) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// --- temporary stubs; replaced in later tasks by openai.go / anthropic_stream.go ---
-
-func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	if !g.authOK(r) {
-		writeErr(w, http.StatusUnauthorized, "invalid api key")
-		return
-	}
-	writeErr(w, http.StatusNotImplemented, "not yet")
-}
+// --- temporary stub; replaced in Task 8 by anthropic_stream.go ---
 
 func (g *Gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if !g.authOK(r) {
