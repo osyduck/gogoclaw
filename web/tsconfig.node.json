@@ -7,7 +7,9 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "composite": true
+    "composite": true,
+    "outDir": "./node_modules/.cache/tsnode",
+    "tsBuildInfoFile": "./node_modules/.cache/tsnode/tsconfig.node.tsbuildinfo"
   },
   "include": ["vite.config.ts"]
 }
