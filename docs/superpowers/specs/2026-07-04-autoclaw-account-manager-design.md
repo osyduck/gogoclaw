@@ -11,7 +11,9 @@ many AutoClaw accounts: log in via Google OAuth and keep access tokens fresh via
 background refresh. It reproduces AutoClaw's request signing and device identity so
 the AutoGLM backend treats it as a legitimate client.
 
-Go module: `gogoclaw`. Binary: `gogoclaw`.
+Go module: `gogoclaw`. Binary: `gogoclaw`. Stealth auto-login uses a small **Python
+CloakBrowser sidecar** (see §4.7) — the Go core is a single binary; the optional
+bulk auto-login path additionally requires the Python sidecar running locally.
 
 "Web" means a browser-based dashboard served locally — **not** a publicly hosted
 multi-user service. The whole thing runs on the operator's own machine because the
@@ -20,8 +22,10 @@ OAuth callback must land on `localhost:18432` (the original app's loopback redir
 ### Goals
 - Multi-account store of AutoClaw credentials (access + refresh tokens, device identity).
 - **Login** (Google OAuth) with the original `localhost:18432/auth/callback-google` redirect.
-  - Manual per-account login (user drives Google consent).
-  - Automated bulk login (headless browser fills Google credentials).
+  - Manual per-account login (user drives Google consent — real browser, zero detection).
+  - Automated bulk login via a **stealth** browser (CloakBrowser sidecar) — stealth is
+    a hard requirement, so plain chromedp is rejected in favor of CloakBrowser's
+    source-level fingerprint patches + humanized behavior.
 - **Auto-refresh** access tokens before expiry, plus manual "Refresh now".
 - Realtime dashboard: account list, status, token expiry, actions.
 
@@ -92,7 +96,7 @@ consent screen*; URL generation, callback capture, code exchange, and storage ar
 Browser (dashboard, React/TanStack)
         │ HTTP (localhost:18432)
 ┌───────▼──────────────────────────────────────────────┐
-│ Go server (single process, local)                     │
+│ Go server: gogoclaw (single process, local)           │
 │                                                       │
 │  AuthEngine ──▶ pending[state]                         │
 │      ▲                │                                │
@@ -100,12 +104,18 @@ Browser (dashboard, React/TanStack)
 │      │                │  code+state                    │
 │  LoginDriver          ▼                                │
 │  ├ ManualDriver   google-oauth-login ──▶ Store         │
-│  └ AutoDriver(chromedp)                  ▲             │
-│                                          │             │
-│  Refresher (scheduler) ──────────────────┘             │
-└───────────────────────────────────────────────────────┘
-        │ signed HTTPS (x-auth-sign)
-        ▼ autoglm-api.autoglm.ai
+│  └ AutoDriver ─┐                          ▲            │
+│                │ HTTP POST /drive         │            │
+│  Refresher ────┼──────────────────────────┘            │
+└────────────────┼──────────────────────────────────────┘
+        │        ▼ (localhost, e.g. :31500)
+        │   ┌─────────────────────────────────┐
+        │   │ CloakBrowser sidecar (Python)   │
+        │   │ launch(humanize) → drive Google │
+        │   │ → redirect to :18432 callback ──┼──┐
+        │   └─────────────────────────────────┘  │ (browser hits
+        │ signed HTTPS (x-auth-sign)             │  gogoclaw callback)
+        ▼ autoglm-api.autoglm.ai  ◀──────────────┘
 ```
 
 **Shared login pipeline (manual & auto):**
@@ -127,7 +137,8 @@ gogoclaw/                        # go module: gogoclaw
 │   ├── auth/      # AuthEngine + LoginDriver + drivers
 │   ├── refresh/   # scheduler
 │   └── server/    # http handlers + callback + SSE + embed
-└── web/           # Vite + React + TanStack (built → web/dist, go:embed)
+├── web/           # Vite + React + TanStack (built → web/dist, go:embed)
+└── sidecar/       # Python CloakBrowser stealth driver (separate process, §4.7)
 ```
 
 ### 4.1 `api` — AutoGLM client (stateless)
@@ -190,9 +201,10 @@ func (e *AuthEngine) Status(state string) Session
 ```
 - **ManualDriver**: returns the `oauth_url` for the UI to open; does not block —
   the callback completes the flow.
-- **AutoDriver**: chromedp headless — `#identifierId` → `#identifierNext` →
-  `input[name="Passwd"]` → `#passwordNext` → click consent (allow/continue/accept…),
-  wait for redirect to `localhost:18432`. Bounded concurrency (2–3) for bulk.
+- **AutoDriver**: an **HTTP client to the CloakBrowser sidecar** (§4.7). Posts
+  `{oauth_url, email, password, proxy?}` to `/drive`; the sidecar drives Google to
+  completion. AutoDriver holds no browser logic itself. Bounded concurrency (2–3)
+  for bulk enforced in Go before dispatching to the sidecar.
 
 ### 4.5 `refresh` — scheduler
 ```go
@@ -215,6 +227,34 @@ On refresh failure (e.g. refresh_token expired) → `SetStatus(needs_relogin)`; 
 | `DELETE /api/accounts/{email}` | remove |
 | `GET /api/events` | **SSE** — push login-status + refresh events |
 
+### 4.7 `sidecar/` — CloakBrowser stealth driver (Python)
+A small standalone Python service (its own dir, not part of the Go module) that owns
+all stealth browser automation. It is **stateless** and knows nothing about `state`,
+`code`, tokens, or the store — it only drives Google to the point of redirect.
+
+```python
+# POST /drive  {oauth_url, email, password, proxy?}  ->  {ok, reason?}
+browser = launch(headless=HEADLESS, humanize=True, proxy=proxy)  # cloakbrowser
+page = browser.new_page()
+page.goto(oauth_url)
+page.locator("#identifierId").fill(email);        page.locator("#identifierNext").click()
+page.locator('input[name="Passwd"]').fill(password); page.locator("#passwordNext").click()
+# handle consent (allow/continue/accept…) if shown
+page.wait_for_url("http://localhost:18432/**")   # redirect => Google finished; gogoclaw
+browser.close()                                   # callback already captured the token
+return {"ok": True}
+```
+- Stack: `cloakbrowser` + a tiny async HTTP server (`aiohttp`). Runs on e.g. `127.0.0.1:31500`.
+- Verified via context7: `launch(humanize=True, proxy=…, headless=…)`, Playwright-style
+  `page.goto` / `page.locator(sel).fill/.click` / `page.wait_for_url`, `browser.close()`.
+- The browser's redirect to `localhost:18432/auth/callback-google` is a real request to
+  gogoclaw → the existing callback listener exchanges + stores the token. The sidecar
+  just reports success/failure (wrong password, 2FA challenge, captcha → `ok:false`).
+- Google credentials live only in the POST body → in-memory in the sidecar, never persisted.
+- Optional per-account **residential proxy** for stronger stealth (CloakBrowser supports it).
+- Lifecycle: gogoclaw may spawn the sidecar on demand (subprocess) or the user runs it;
+  the interface is decoupled either way.
+
 ## 5. Login flows
 
 **Manual:** UI `[+ Add]` → `POST /api/login/start {mode:manual}` → `{state, oauth_url}`
@@ -223,9 +263,11 @@ On refresh failure (e.g. refresh_token expired) → `SetStatus(needs_relogin)`; 
 "Login successful — you can close this tab" page.
 
 **Auto (bulk):** UI `[Bulk login]` → textarea of `email:password` lines →
-per line `POST /api/login/start {mode:auto, cred}` → AutoDriver (chromedp) drives
-consent → same callback → SSE progress per state. Credentials used in-memory, then
-discarded. Concurrency capped; per-account failures reported without aborting the batch.
+per line `POST /api/login/start {mode:auto, cred}` → AutoDriver POSTs to the
+CloakBrowser sidecar `/drive` → sidecar (stealth + humanized) drives Google → browser
+redirects to `:18432` → **same callback** exchanges + stores → SSE progress per state.
+Credentials used in-memory (Go + sidecar), then discarded. Concurrency capped in Go
+(2–3); per-account failures (`ok:false` from sidecar) reported without aborting the batch.
 
 ## 6. Web UI (TanStack) & design direction
 
@@ -270,8 +312,12 @@ Detailed crafting (exact tokens, component states, browser-tested contrast) happ
 during implementation via the `impeccable` skill; this section fixes the direction.
 
 ## 7. Security & operational notes
-- Runs on loopback only; bind `127.0.0.1:18432` (not `0.0.0.0`).
-- Google credentials never touch disk; only transit AutoDriver in memory.
+- Runs on loopback only; bind `127.0.0.1:18432` (not `0.0.0.0`). Sidecar likewise binds
+  `127.0.0.1:31500`.
+- Google credentials never touch disk; they transit Go's AutoDriver → sidecar POST body,
+  held in memory only, discarded after the drive.
+- Optional per-account residential proxy (via the sidecar) improves stealth and avoids
+  IP-based rate limits across many accounts.
 - Token store (`accounts.db`) holds live bearer tokens — it is sensitive; file lives
   beside the binary with default user-only perms. (Encryption-at-rest = future option.)
 - `x-auth-sign` freshness: regenerate timestamp+sign per request; the server enforces
@@ -284,7 +330,10 @@ during implementation via the `impeccable` skill; this section fixes the directi
 - Duplicate account (same email) → update existing tokens/identity, don't duplicate rows.
 - Refresh: `refresh` returns new access (+ maybe new refresh); persist both, update `LastRefreshedAt`.
 - Refresh failure → `needs_relogin`; scheduler skips until re-login.
-- chromedp: Chrome not installed → clear error on the auto flow only (manual unaffected).
+- Sidecar down / not installed → clear error on the auto flow only (manual unaffected,
+  since manual needs no sidecar).
+- Sidecar `ok:false` (wrong password, 2FA, captcha) → that account's session `error`;
+  UI suggests manual login for that one.
 - Bulk: bounded concurrency; one failure doesn't abort the batch; per-line result reported.
 
 ## 9. Testing strategy
@@ -305,8 +354,14 @@ during implementation via the `impeccable` skill; this section fixes the directi
 |---|---|---|
 | stdlib `net/http` | — | server, SSE, callback |
 | `modernc.org/sqlite` | `import _ "modernc.org/sqlite"`; `sql.Open("sqlite", dsn)` | pure Go, **no cgo**; driver name is `"sqlite"`; DSN supports `?_pragma=...` |
-| `github.com/chromedp/chromedp` | `NewContext`, `Run`, `Navigate`, `WaitVisible`, `SendKeys`, `Click` (`ByID`/`ByQuery`), `Location` | auto driver only; needs Chrome/Chromium; use `context.WithTimeout` + exec-allocator for headless |
 | stdlib `crypto/ed25519`, `crypto/sha256`, `crypto/md5`, `encoding/base64` | — | identity, signing, JWT claim decode |
+| stdlib `net/http` (client) | POST to sidecar `/drive` | AutoDriver → CloakBrowser sidecar |
+
+**Python sidecar (separate process, stealth auto-login only):**
+| Dependency | Usage | Notes |
+|---|---|---|
+| `cloakbrowser` | `launch(humanize=True, proxy, headless)`, `page.goto`, `page.locator(sel).fill/.click`, `page.wait_for_url`, `browser.close()` | stealth Chromium, source-level fingerprint patches; Playwright-style API (verified via context7) |
+| `aiohttp` | tiny async HTTP server exposing `POST /drive` | binds `127.0.0.1:31500` |
 
 **Frontend (dev toolchain only; output embedded):**
 | Dependency | Package | Notes |
@@ -318,10 +373,15 @@ during implementation via the `impeccable` skill; this section fixes the directi
 | Phosphor Icons | `@phosphor-icons/react` | `*Icon` components, `weight` prop, `IconContext.Provider` |
 
 **Build:** `vite build` (→ `web/dist`) then `go build ./cmd/gogoclaw` → one static
-binary + `accounts.db` at runtime.
+binary + `accounts.db` at runtime. For the stealth auto-login path only:
+`pip install -r sidecar/requirements.txt` and run the sidecar (or let gogoclaw spawn it).
 
 ## 11. Open questions / future
 - Encrypt `accounts.db` at rest?
+- Sidecar lifecycle: gogoclaw auto-spawns the Python sidecar (subprocess) vs. user runs
+  it manually — which is the default shipping behavior?
+- Proxy sourcing for bulk stealth: per-account proxy list in the UI, or a single shared
+  residential proxy? (No proxy is acceptable for small batches.)
 - Re-introduce the LLM proxy (chat completions, round-robin) as a follow-up project?
 - Gateway (openclaw WS) connectivity using the stored ed25519 identity?
 - Light theme variant for the dashboard?
