@@ -8,6 +8,7 @@ export function parseCreds(text: string): { email: string; password: string }[] 
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
+    .filter((line) => line.indexOf(":") >= 0)
     .map((line) => {
       const idx = line.indexOf(":");
       return { email: line.slice(0, idx).trim(), password: line.slice(idx + 1).trim() };

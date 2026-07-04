@@ -88,6 +88,15 @@ async def test_drive_endpoint_missing_field(aiohttp_client):
     assert resp.status == 400
 
 
+async def test_drive_endpoint_non_dict_body(aiohttp_client):
+    app = make_app(drive_fn=lambda **kw: {"ok": True})
+    client = await aiohttp_client(app)
+    resp = await client.post("/drive", json=["not", "a", "dict"])
+    assert resp.status == 400
+    resp2 = await client.post("/drive", json=42)
+    assert resp2.status == 400
+
+
 async def test_health(aiohttp_client):
     client = await aiohttp_client(make_app())
     resp = await client.get("/health")

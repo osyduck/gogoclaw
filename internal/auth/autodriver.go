@@ -13,10 +13,11 @@ import (
 type AutoDriver struct {
 	sidecarURL string
 	http       *http.Client
+	sem        chan struct{}
 }
 
 func NewAutoDriver(sidecarURL string) *AutoDriver {
-	return &AutoDriver{sidecarURL: sidecarURL, http: &http.Client{Timeout: 3 * time.Minute}}
+	return &AutoDriver{sidecarURL: sidecarURL, http: &http.Client{Timeout: 3 * time.Minute}, sem: make(chan struct{}, 3)}
 }
 
 // Drive posts the credentials to the sidecar's /drive and blocks until it reports
@@ -24,6 +25,12 @@ func NewAutoDriver(sidecarURL string) *AutoDriver {
 func (d *AutoDriver) Drive(ctx context.Context, oauthURL string, cred *GoogleCred) error {
 	if cred == nil {
 		return fmt.Errorf("auto login requires Google credentials")
+	}
+	select {
+	case d.sem <- struct{}{}:
+		defer func() { <-d.sem }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	payload := map[string]string{
 		"oauth_url": oauthURL, "email": cred.Email, "password": cred.Password, "proxy": cred.Proxy,

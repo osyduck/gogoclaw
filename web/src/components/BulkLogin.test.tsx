@@ -15,6 +15,12 @@ test("parseCreds skips blank lines", () => {
   expect(parseCreds("a@x.com:pw\n\n  \n")).toHaveLength(1);
 });
 
+test("parseCreds skips lines with no colon", () => {
+  const result = parseCreds("noColonHere\na@x.com:pw");
+  expect(result).toHaveLength(1);
+  expect(result[0]).toEqual({ email: "a@x.com", password: "pw" });
+});
+
 test("parses email:password lines and posts them, showing results", async () => {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
     JSON.stringify({ started: [{ email: "a@x.com", state: "s1" }, { email: "b@x.com", state: "s2" }], errors: [] }),

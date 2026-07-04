@@ -13,6 +13,8 @@ async def handle_drive(request):
         body = await request.json()
     except Exception:
         return web.json_response({"ok": False, "reason": "invalid json"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "reason": "body must be a JSON object"}, status=400)
     missing = [f for f in REQUIRED_FIELDS if f not in body]
     if missing:
         return web.json_response({"ok": False, "reason": f"missing: {', '.join(missing)}"}, status=400)

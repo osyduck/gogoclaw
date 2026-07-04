@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
@@ -28,6 +29,34 @@ type autoLogin struct {
 func (a *autoLogin) Ensure(ctx context.Context) error { return a.mgr.Ensure(ctx) }
 func (a *autoLogin) Driver() auth.LoginDriver         { return a.driver }
 
+// pickPython returns the first candidate for which canImport reports it can
+// actually run the sidecar (i.e. import aiohttp), skipping empty candidates.
+// Returns "" if none work.
+func pickPython(candidates []string, canImport func(string) bool) string {
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if canImport(c) {
+			return c
+		}
+	}
+	return ""
+}
+
+// pythonCandidates lists python executables to try, in priority order: an
+// explicit override, then the usual PATH names.
+func pythonCandidates() []string {
+	return []string{os.Getenv("GOGOCLAW_PYTHON"), "python", "python3"}
+}
+
+// canImportAiohttp reports whether the given python executable can import
+// aiohttp, i.e. is a real interpreter capable of running the sidecar (as
+// opposed to e.g. a broken/incomplete venv shim).
+func canImportAiohttp(py string) bool {
+	return exec.Command(py, "-c", "import aiohttp").Run() == nil
+}
+
 // buildHandler wires the app graph and returns the HTTP handler plus the refresher
 // (whose Run loop the caller starts).
 func buildHandler(st store.Store, c *api.Client, bus *events.Bus, al server.AutoLogin) (http.Handler, *refresh.Refresher) {
@@ -45,13 +74,14 @@ func main() {
 
 	bus := events.New()
 
-	pyPath := "python"
-	if p, err := exec.LookPath("python"); err == nil {
-		pyPath = p
+	var al server.AutoLogin
+	if py := pickPython(pythonCandidates(), canImportAiohttp); py == "" {
+		log.Println("auto-login disabled: no Python with aiohttp found; set GOGOCLAW_PYTHON")
+	} else {
+		mgr := sidecar.New(py, ".", "127.0.0.1:31500")
+		al = &autoLogin{mgr: mgr, driver: auth.NewAutoDriver(mgr.URL())}
+		defer mgr.Stop()
 	}
-	mgr := sidecar.New(pyPath, ".", "127.0.0.1:31500")
-	al := &autoLogin{mgr: mgr, driver: auth.NewAutoDriver(mgr.URL())}
-	defer mgr.Stop()
 
 	handler, refresher := buildHandler(st, api.NewClient(), bus, al)
 

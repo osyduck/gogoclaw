@@ -30,3 +30,14 @@ func TestBuildHandler_ServesUIAndAPI(t *testing.T) {
 		t.Errorf("accounts route code = %d body = %s", rec2.Code, rec2.Body)
 	}
 }
+
+func TestPickPython(t *testing.T) {
+	canImport := func(p string) bool { return p == "good" }
+
+	if got := pickPython([]string{"", "bad", "good"}, canImport); got != "good" {
+		t.Errorf("pickPython = %q, want %q", got, "good")
+	}
+	if got := pickPython([]string{"", "bad", "worse"}, canImport); got != "" {
+		t.Errorf("pickPython = %q, want empty string", got)
+	}
+}

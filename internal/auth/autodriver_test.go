@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestAutoDriver_PostsCredsAndSucceeds(t *testing.T) {
@@ -46,5 +49,44 @@ func TestAutoDriver_FailureReasonBecomesError(t *testing.T) {
 func TestAutoDriver_NilCredErrors(t *testing.T) {
 	if err := NewAutoDriver("http://127.0.0.1:1").Drive(context.Background(), "u", nil); err == nil {
 		t.Error("expected error for nil credentials")
+	}
+}
+
+// TestAutoDriver_BoundsConcurrencyToThree ensures the AutoDriver itself caps
+// concurrent /drive calls at 3, regardless of how many callers invoke Drive
+// concurrently (the bulk handler's dispatch semaphore alone isn't enough,
+// since StartLogin returns before the real Drive work happens). Without the
+// semaphore in Drive, this test's recorded max concurrency would reach ~6.
+func TestAutoDriver_BoundsConcurrencyToThree(t *testing.T) {
+	var current atomic.Int32
+	var maxSeen atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := current.Add(1)
+		for {
+			old := maxSeen.Load()
+			if n <= old || maxSeen.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(40 * time.Millisecond)
+		current.Add(-1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer srv.Close()
+
+	d := NewAutoDriver(srv.URL)
+	const n = 6
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = d.Drive(context.Background(), "u", &GoogleCred{Email: "a@x.com", Password: "pw"})
+		}(i)
+	}
+	wg.Wait()
+
+	if got := maxSeen.Load(); got > 3 {
+		t.Errorf("max concurrency = %d, want <= 3", got)
 	}
 }

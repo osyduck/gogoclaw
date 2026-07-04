@@ -57,6 +57,13 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	if m.healthy(ctx) { // re-check under lock
 		return nil
 	}
+	if m.cmd != nil {
+		// Previous sidecar process died (health check failed); reap its
+		// handle before spawning a replacement to avoid leaking it.
+		_ = m.cmd.Process.Kill()
+		_ = m.cmd.Wait()
+		m.cmd = nil
+	}
 	cmd := exec.Command(m.python, "-m", "sidecar")
 	cmd.Dir = m.scriptDir
 	cmd.Stdout = os.Stderr
