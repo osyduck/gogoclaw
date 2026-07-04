@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"gogoclaw/internal/auth"
@@ -14,16 +16,23 @@ import (
 	"gogoclaw/web"
 )
 
+// AutoLogin drives stealth auto-logins via the sidecar (Plan 4). Nil disables auto mode.
+type AutoLogin interface {
+	Ensure(ctx context.Context) error
+	Driver() auth.LoginDriver
+}
+
 // Server owns the HTTP surface.
 type Server struct {
 	engine    *auth.AuthEngine
 	refresher *refresh.Refresher
 	store     store.Store
 	bus       *events.Bus
+	autoLogin AutoLogin
 }
 
-func New(engine *auth.AuthEngine, refresher *refresh.Refresher, st store.Store, bus *events.Bus) *Server {
-	return &Server{engine: engine, refresher: refresher, store: st, bus: bus}
+func New(engine *auth.AuthEngine, refresher *refresh.Refresher, st store.Store, bus *events.Bus, autoLogin AutoLogin) *Server {
+	return &Server{engine: engine, refresher: refresher, store: st, bus: bus, autoLogin: autoLogin}
 }
 
 // Handler builds the route mux.
@@ -31,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/callback-google", s.handleCallback)
 	mux.HandleFunc("POST /api/login/start", s.handleLoginStart)
+	mux.HandleFunc("POST /api/login/bulk", s.handleBulkLogin)
 	mux.HandleFunc("GET /api/login/status", s.handleLoginStatus)
 	mux.HandleFunc("GET /api/accounts", s.handleAccounts)
 	mux.HandleFunc("POST /api/accounts/refresh-all", s.handleRefreshAll)
@@ -54,7 +64,20 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.Mode == "auto" {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "auto login arrives in Plan 4"})
+		if s.autoLogin == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "auto login not configured"})
+			return
+		}
+		if err := s.autoLogin.Ensure(r.Context()); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		state, url, err := s.engine.StartLogin(r.Context(), s.autoLogin.Driver(), req.Cred)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"state": state, "oauth_url": url})
 		return
 	}
 	state, url, err := s.engine.StartLogin(r.Context(), auth.ManualDriver{}, nil)
@@ -184,4 +207,58 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
+	if s.autoLogin == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "auto login not configured"})
+		return
+	}
+	var req struct {
+		Accounts []auth.GoogleCred `json:"accounts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Accounts) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected non-empty accounts array"})
+		return
+	}
+	if err := s.autoLogin.Ensure(r.Context()); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type startedItem struct {
+		Email string `json:"email"`
+		State string `json:"state"`
+	}
+	type errItem struct {
+		Email string `json:"email"`
+		Error string `json:"error"`
+	}
+	var (
+		mu      sync.Mutex
+		started []startedItem
+		errs    []errItem
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 3) // bounded concurrency
+	)
+	driver := s.autoLogin.Driver()
+	for i := range req.Accounts {
+		cred := req.Accounts[i]
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			state, _, err := s.engine.StartLogin(r.Context(), driver, &cred)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, errItem{Email: cred.Email, Error: err.Error()})
+				return
+			}
+			started = append(started, startedItem{Email: cred.Email, State: state})
+		}()
+	}
+	wg.Wait()
+	writeJSON(w, http.StatusOK, map[string]any{"started": started, "errors": errs})
 }

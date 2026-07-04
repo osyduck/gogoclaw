@@ -15,7 +15,7 @@ func TestBuildHandler_ServesUIAndAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	h, refresher := buildHandler(st, api.NewClient(), events.New())
+	h, refresher := buildHandler(st, api.NewClient(), events.New(), nil)
 	if refresher == nil {
 		t.Fatal("refresher not built")
 	}
