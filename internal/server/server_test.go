@@ -101,10 +101,40 @@ func TestBulkLogin_StartsEachAccount(t *testing.T) {
 			Email string `json:"email"`
 			State string `json:"state"`
 		} `json:"started"`
+		Errors []struct {
+			Email string `json:"email"`
+			Error string `json:"error"`
+		} `json:"errors"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if len(out.Started) != 2 {
 		t.Errorf("started = %d, want 2 (%s)", len(out.Started), rec.Body)
+	}
+	if out.Errors == nil {
+		t.Errorf("errors decoded as nil, want empty non-nil slice (%s)", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"errors":[]`) {
+		t.Errorf("body = %s, want errors field to marshal as [] not null", rec.Body)
+	}
+}
+
+func TestBulkLogin_501WhenUnconfigured(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	body := `{"accounts":[{"email":"a@x.com","password":"p1"}]}`
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(body)))
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("code = %d, want 501 when auto-login unconfigured", rec.Code)
+	}
+}
+
+func TestBulkLogin_400OnEmptyAccounts(t *testing.T) {
+	al := &fakeAutoLogin{driver: stubDriver{}}
+	h := newServerWithAuto(t, func(w http.ResponseWriter, r *http.Request) {}, al)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(`{"accounts":[]}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400 for empty accounts", rec.Code)
 	}
 }
 

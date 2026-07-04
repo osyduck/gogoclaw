@@ -236,8 +236,8 @@ func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var (
 		mu      sync.Mutex
-		started []startedItem
-		errs    []errItem
+		started = []startedItem{}
+		errs    = []errItem{}
 		wg      sync.WaitGroup
 		sem     = make(chan struct{}, 3) // bounded concurrency
 	)
