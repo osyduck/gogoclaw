@@ -24,7 +24,8 @@ async def handle_drive(request):
     try:
         result = await loop.run_in_executor(
             None,
-            lambda: drive_fn(body["oauth_url"], body["email"], body["password"], body.get("proxy")),
+            lambda: drive_fn(body["oauth_url"], body["email"], body["password"],
+                             body.get("proxy"), provider=body.get("provider", "google")),
         )
     except Exception as exc:
         return web.json_response({"ok": False, "reason": str(exc)})

@@ -8,11 +8,14 @@ class FakeLocator:
         self.calls = calls
         self.sel = sel
 
-    def fill(self, value):
+    def fill(self, value, **kw):
         self.calls.append(("fill", self.sel, value))
 
-    def click(self):
+    def click(self, **kw):
         self.calls.append(("click", self.sel))
+
+    def check(self, **kw):
+        self.calls.append(("check", self.sel))
 
 
 class FakePage:
@@ -73,8 +76,25 @@ def test_drive_launcher_failure_returns_reason():
     assert "chromium launch failed" in result["reason"]
 
 
+def test_drive_zai_clicks_google_then_authorizes():
+    calls = []
+    browser = FakeBrowser(calls)
+    result = drive("https://chat.z.ai/x", "a@x.com", "pw", provider="zai",
+                   launcher=lambda **kw: browser)
+    assert result == {"ok": True}
+    sels = [c[1] for c in calls if c[0] == "click"]
+    # pre-step: continue with Google on chat.z.ai
+    assert any("Continue with Google" in s for s in sels)
+    # Google login still happens
+    assert ("fill", "#identifierId", "a@x.com") in calls
+    # post-step: chat.z.ai ToS checkbox is ticked and its Continue is clicked
+    assert any(c[0] == "check" for c in calls)
+    assert any(s == "button:has-text('Continue')" for s in sels)
+    assert any(c[0] == "wait_for_url" for c in calls)
+
+
 async def test_drive_endpoint_ok(aiohttp_client):
-    app = make_app(drive_fn=lambda oauth_url, email, password, proxy=None: {"ok": True})
+    app = make_app(drive_fn=lambda oauth_url, email, password, proxy=None, provider="google": {"ok": True})
     client = await aiohttp_client(app)
     resp = await client.post("/drive", json={"oauth_url": "u", "email": "a@x.com", "password": "pw"})
     assert resp.status == 200
