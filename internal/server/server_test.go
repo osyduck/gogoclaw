@@ -12,6 +12,7 @@ import (
 	"gogoclaw/internal/api"
 	"gogoclaw/internal/auth"
 	"gogoclaw/internal/events"
+	"gogoclaw/internal/proxy"
 	"gogoclaw/internal/refresh"
 	"gogoclaw/internal/store"
 )
@@ -35,7 +36,8 @@ func newServer(t *testing.T, autoglm http.HandlerFunc) (http.Handler, store.Stor
 	t.Cleanup(func() { st.Close() })
 	c := api.NewClientWithBase(srv.URL)
 	bus := events.New()
-	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, nil).Handler(), st
+	gw := proxy.New(st, srv.URL)
+	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, nil, gw).Handler(), st
 }
 
 // fakeAutoLogin drives logins through a stub driver without a real sidecar.
@@ -64,7 +66,8 @@ func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) htt
 	t.Cleanup(func() { st.Close() })
 	c := api.NewClientWithBase(srv.URL)
 	bus := events.New()
-	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, al).Handler()
+	gw := proxy.New(st, srv.URL)
+	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, al, gw).Handler()
 }
 
 func TestCallbackZaiRouteExists(t *testing.T) {
