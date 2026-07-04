@@ -52,21 +52,52 @@ func TestChatCompletionsRewritesModelAndStreams(t *testing.T) {
 	mux := http.NewServeMux()
 	gw.Register(mux)
 	rr := httptest.NewRecorder()
+	// glm-5-turbo carries the zai_ X-Request-Model header.
 	req := httptest.NewRequest("POST", "/v1/chat/completions",
-		strings.NewReader(`{"model":"glm-5.2","stream":true,"messages":[]}`))
+		strings.NewReader(`{"model":"glm-5-turbo","stream":true,"messages":[]}`))
 	mux.ServeHTTP(rr, req)
 
 	if rr.Code != 200 {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
-	if gotModelHeader != "openrouter_glm-5.2" {
+	if gotModelHeader != "zai_glm-5-turbo" {
 		t.Errorf("X-Request-Model = %q", gotModelHeader)
 	}
-	if gotBodyModel != "glm-5.2" {
-		t.Errorf("body model = %q, want bare glm-5.2", gotBodyModel)
+	if gotBodyModel != "glm-5-turbo" {
+		t.Errorf("body model = %q, want bare glm-5-turbo", gotBodyModel)
 	}
 	if !strings.Contains(rr.Body.String(), "[DONE]") {
 		t.Errorf("stream not passed through: %s", rr.Body.String())
+	}
+}
+
+func TestChatCompletionsGLM52OmitsRequestModelHeader(t *testing.T) {
+	var hadHeader bool
+	var gotBodyModel string
+	gw := gatewayTo(t, func(w http.ResponseWriter, r *http.Request) {
+		_, hadHeader = r.Header["X-Request-Model"]
+		var body struct {
+			Model string `json:"model"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &body)
+		gotBodyModel = body.Model
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: [DONE]\n\n")
+	})
+	mux := http.NewServeMux()
+	gw.Register(mux)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"glm-5.2","stream":true,"messages":[]}`)))
+	if rr.Code != 200 {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	if hadHeader {
+		t.Error("glm-5.2 must NOT send an X-Request-Model header (forces deepseek fallback)")
+	}
+	if gotBodyModel != "glm-5.2" {
+		t.Errorf("body model = %q", gotBodyModel)
 	}
 }
 

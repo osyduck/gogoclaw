@@ -2,22 +2,28 @@ package proxy
 
 import "sort"
 
-// Route maps a friendly model name to the upstream provider prefix and the bare
-// model id sent in the request body.
+// Route maps a friendly model name to the request-body "model" value and the
+// X-Request-Model header value. ReqModel may be empty, in which case the header
+// is omitted — some models (e.g. glm-5.2 on non-BYOK accounts) route correctly
+// from the body model alone and are forced to a fallback (deepseek-v4-pro) when
+// a provider-prefixed X-Request-Model they aren't entitled to is sent.
 type Route struct {
-	Prefix string
-	Bare   string
+	Body     string // request-body "model" value
+	ReqModel string // X-Request-Model header; "" = omit the header
 }
-
-// Prefixed returns the value for the X-Request-Model header, e.g. "openrouter_glm-5.2".
-func (r Route) Prefixed() string { return r.Prefix + "_" + r.Bare }
 
 // catalog is the static, editable model table. Add a line here to expose a new
 // AutoClaw model. Keys are the friendly ids clients send as "model".
+//
+// Values were verified live against these accounts:
+//   - glm-5.2:     body "glm-5.2", no header      -> GLM-5.2 (Z.ai). The
+//     openrouter_/zai_ prefixes need BYOK and otherwise fall back to deepseek.
+//   - glm-5-turbo: body "glm-5-turbo", zai_ header -> glm-5-turbo.
+//   - auto:        body "auto", zai_auto header    -> upstream picks (deepseek).
 var catalog = map[string]Route{
-	"glm-5.2":     {Prefix: "openrouter", Bare: "glm-5.2"},
-	"glm-5-turbo": {Prefix: "zai", Bare: "glm-5-turbo"},
-	"auto":        {Prefix: "zai", Bare: "auto"},
+	"glm-5.2":     {Body: "glm-5.2", ReqModel: ""},
+	"glm-5-turbo": {Body: "glm-5-turbo", ReqModel: "zai_glm-5-turbo"},
+	"auto":        {Body: "auto", ReqModel: "zai_auto"},
 }
 
 // Lookup resolves a friendly model name to its Route.

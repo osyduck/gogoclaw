@@ -3,12 +3,15 @@ package proxy
 import "testing"
 
 func TestCatalogLookup(t *testing.T) {
+	// glm-5.2 routes from the body model alone; no X-Request-Model header.
 	r, ok := Lookup("glm-5.2")
-	if !ok || r.Prefix != "openrouter" || r.Bare != "glm-5.2" {
+	if !ok || r.Body != "glm-5.2" || r.ReqModel != "" {
 		t.Fatalf("glm-5.2 = %+v ok=%v", r, ok)
 	}
-	if r.Prefixed() != "openrouter_glm-5.2" {
-		t.Fatalf("prefixed = %s", r.Prefixed())
+	// glm-5-turbo carries a zai_ header.
+	rt, _ := Lookup("glm-5-turbo")
+	if rt.Body != "glm-5-turbo" || rt.ReqModel != "zai_glm-5-turbo" {
+		t.Fatalf("glm-5-turbo = %+v", rt)
 	}
 	if _, ok := Lookup("nope"); ok {
 		t.Fatal("unknown model should not resolve")

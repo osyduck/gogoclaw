@@ -37,11 +37,11 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	// streamed; a non-streaming client gets the SSE aggregated into one JSON body.
 	var clientStream bool
 	_ = json.Unmarshal(fields["stream"], &clientStream)
-	fields["model"], _ = json.Marshal(route.Bare)
+	fields["model"], _ = json.Marshal(route.Body)
 	fields["stream"], _ = json.Marshal(true) // always stream upstream
 	body, _ := json.Marshal(fields)
 
-	resp, _, err := g.fwd.Forward(r.Context(), g.sel, route.Prefixed(), body)
+	resp, _, err := g.fwd.Forward(r.Context(), g.sel, route.ReqModel, body)
 	if err == ErrNoEligible {
 		writeErr(w, http.StatusServiceUnavailable, "no eligible accounts")
 		return

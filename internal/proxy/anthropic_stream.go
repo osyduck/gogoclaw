@@ -269,10 +269,10 @@ func (g *Gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// friendly name).
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(oaiBody, &fields)
-	fields["model"], _ = json.Marshal(route.Bare)
+	fields["model"], _ = json.Marshal(route.Body)
 	oaiBody, _ = json.Marshal(fields)
 
-	resp, _, err := g.fwd.Forward(r.Context(), g.sel, route.Prefixed(), oaiBody)
+	resp, _, err := g.fwd.Forward(r.Context(), g.sel, route.ReqModel, oaiBody)
 	if err == ErrNoEligible {
 		writeErr(w, http.StatusServiceUnavailable, "no eligible accounts")
 		return

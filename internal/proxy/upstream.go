@@ -61,7 +61,9 @@ func (f *Forwarder) Do(ctx context.Context, acct store.Account, prefixedModel st
 	// AccessToken is stored with its "Bearer " prefix already (codebase
 	// convention), so set X-Authorization to the raw value — no extra prefix.
 	h.Set("X-Authorization", acct.AccessToken)
-	h.Set("X-Request-Model", prefixedModel)
+	if prefixedModel != "" {
+		h.Set("X-Request-Model", prefixedModel)
+	}
 	h.Set("x_trace_id", "autoclaw-desktop")
 	h.Set("X-Version", api.Version)
 	h.Set("X-Product", api.Product)
