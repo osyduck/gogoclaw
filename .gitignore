@@ -26,3 +26,8 @@ web/node_modules/
 # TypeScript incremental build cache (tsc -b emits these even with noEmit)
 *.tsbuildinfo
 
+# Python
+__pycache__/
+.pytest_cache/
+sidecar/.venv/
+
