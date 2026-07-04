@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// newTestClient spins up a mock AutoGLM server; handler receives (path, body).
-func newTestClient(t *testing.T, handler func(path string, body map[string]any) any) (*Client, func()) {
+// newTestClient spins up a mock AutoGLM server; handler receives (path, body, authorization header).
+func newTestClient(t *testing.T, handler func(path string, body map[string]any, auth string) any) (*Client, func()) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-auth-sign") == "" || r.Header.Get("x-auth-appid") != "100003" {
 			t.Errorf("missing signing headers on %s", r.URL.Path)
@@ -19,14 +19,14 @@ func newTestClient(t *testing.T, handler func(path string, body map[string]any) 
 		if b, _ := io.ReadAll(r.Body); len(b) > 0 {
 			_ = json.Unmarshal(b, &body)
 		}
-		data := handler(r.URL.Path, body)
+		data := handler(r.URL.Path, body, r.Header.Get("authorization"))
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": data})
 	}))
 	return NewClientWithBase(srv.URL), srv.Close
 }
 
 func TestGoogleOAuthURL(t *testing.T) {
-	c, done := newTestClient(t, func(path string, body map[string]any) any {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/overseasv1/google-oauth-url" {
 			t.Errorf("path = %s", path)
 		}
@@ -35,6 +35,9 @@ func TestGoogleOAuthURL(t *testing.T) {
 		}
 		if body["navigate_uri"] != NavigateURI {
 			t.Errorf("navigate_uri = %v", body["navigate_uri"])
+		}
+		if auth != "" {
+			t.Errorf("authorization = %q, want empty", auth)
 		}
 		return map[string]any{"oauth_url": "https://accounts.google.com/x", "state": "st1"}
 	})
@@ -49,12 +52,18 @@ func TestGoogleOAuthURL(t *testing.T) {
 }
 
 func TestGoogleOAuthLogin(t *testing.T) {
-	c, done := newTestClient(t, func(path string, body map[string]any) any {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/overseasv1/google-oauth-login" {
 			t.Errorf("path = %s", path)
 		}
 		if body["code"] != "auth-code" || body["state"] != "st1" {
 			t.Errorf("body = %v", body)
+		}
+		if body["navigate_uri"] != NavigateURI {
+			t.Errorf("navigate_uri = %v", body["navigate_uri"])
+		}
+		if auth != "" {
+			t.Errorf("authorization = %q, want empty", auth)
 		}
 		return map[string]any{
 			"access_token": "Bearer aaa", "refresh_token": "Bearer rrr",
@@ -72,12 +81,15 @@ func TestGoogleOAuthLogin(t *testing.T) {
 }
 
 func TestRefresh(t *testing.T) {
-	c, done := newTestClient(t, func(path string, body map[string]any) any {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/v1/refresh" {
 			t.Errorf("path = %s", path)
 		}
 		if body["refresh_token"] != "Bearer rrr" {
 			t.Errorf("body = %v", body)
+		}
+		if auth != "Bearer old-a" {
+			t.Errorf("authorization = %q, want %q", auth, "Bearer old-a")
 		}
 		return map[string]any{"access_token": "Bearer new-a", "refresh_token": "Bearer new-r", "refresh": false}
 	})
@@ -92,9 +104,12 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestUserProfile(t *testing.T) {
-	c, done := newTestClient(t, func(path string, body map[string]any) any {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/v1/user-profile" {
 			t.Errorf("path = %s", path)
+		}
+		if auth != "Bearer aaa" {
+			t.Errorf("authorization = %q, want %q", auth, "Bearer aaa")
 		}
 		return map[string]any{"email": "evmsnipe@gmail.com", "user_name": "EVM Snipe", "user_id": "hexuser"}
 	})
