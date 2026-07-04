@@ -30,5 +30,5 @@ test("renders accounts and a total count when the list is non-empty", async () =
   ]);
   render(<App />);
   await waitFor(() => expect(screen.getByText("a@x.com")).toBeInTheDocument());
-  expect(screen.getByText(/bulk login/i)).toBeDisabled();
+  expect(screen.getByRole("button", { name: /bulk login/i })).toBeEnabled();
 });

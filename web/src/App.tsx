@@ -1,10 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ArrowsClockwiseIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 import { queryClient } from "./lib/queryClient";
 import { useAccounts, useDeleteAccount, useRefreshAccount, useRefreshAll } from "./hooks/useAccounts";
 import { useServerEvents } from "./hooks/useServerEvents";
 import { AccountsTable } from "./components/AccountsTable";
 import { AddAccount } from "./components/AddAccount";
+import { BulkLogin } from "./components/BulkLogin";
 import { StatTiles } from "./components/StatTiles";
 import { EmptyState } from "./components/EmptyState";
 
@@ -14,6 +16,7 @@ function Dashboard() {
   const refreshOne = useRefreshAccount();
   const refreshAll = useRefreshAll();
   const del = useDeleteAccount();
+  const [bulkOpen, setBulkOpen] = useState(false);
   const list = accounts.data ?? [];
 
   return (
@@ -30,8 +33,8 @@ function Dashboard() {
         <div className="flex items-center gap-3">
           <AddAccount />
           <button
-            type="button" disabled title="Bulk stealth login arrives in Plan 4"
-            className="rounded-lg border border-border px-3 py-2 text-sm text-muted disabled:opacity-50"
+            type="button" onClick={() => setBulkOpen(true)}
+            className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
           >
             Bulk login
           </button>
@@ -62,6 +65,7 @@ function Dashboard() {
           />
         )}
       </div>
+      {bulkOpen && <BulkLogin onClose={() => setBulkOpen(false)} />}
     </div>
   );
 }

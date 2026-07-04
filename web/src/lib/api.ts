@@ -48,3 +48,18 @@ export async function refreshAll(): Promise<void> {
 export async function deleteAccount(email: string): Promise<void> {
   await req(`/api/accounts/${encodeURIComponent(email)}`, { method: "DELETE" });
 }
+
+export interface BulkResult {
+  started: { email: string; state: string }[];
+  errors: { email: string; error: string }[];
+}
+
+export async function bulkLogin(
+  creds: { email: string; password: string }[],
+): Promise<BulkResult> {
+  return (await req("/api/login/bulk", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ accounts: creds }),
+  })) as BulkResult;
+}
