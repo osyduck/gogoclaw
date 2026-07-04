@@ -82,26 +82,60 @@ type Profile struct {
 	UserID   string `json:"user_id"`
 }
 
-func (c *Client) GoogleOAuthURL(ctx context.Context, deviceID string) (string, string, error) {
-	body := map[string]string{"source_id": SourceID, "device_id": deviceID, "navigate_uri": NavigateURI}
+// Provider selects which OAuth broker AutoClaw authenticates through.
+type Provider string
+
+const (
+	ProviderGoogle Provider = "google"
+	ProviderZai    Provider = "zai"
+)
+
+// ParseProvider validates a provider string from an untrusted source. Empty
+// defaults to Google. Unknown values error rather than becoming a URL path.
+func ParseProvider(s string) (Provider, error) {
+	switch Provider(s) {
+	case "", ProviderGoogle:
+		return ProviderGoogle, nil
+	case ProviderZai:
+		return ProviderZai, nil
+	default:
+		return "", fmt.Errorf("unknown login provider %q", s)
+	}
+}
+
+// NavigateURIFor is the OAuth redirect (callback) URL for a provider.
+func NavigateURIFor(p Provider) string {
+	return "http://localhost:18432/auth/callback-" + string(p)
+}
+
+func (c *Client) OAuthURL(ctx context.Context, p Provider, deviceID string) (string, string, error) {
+	body := map[string]string{"source_id": SourceID, "device_id": deviceID, "navigate_uri": NavigateURIFor(p)}
 	var out struct {
 		OAuthURL string `json:"oauth_url"`
 		State    string `json:"state"`
 	}
-	if err := c.postSigned(ctx, "/userapi/overseasv1/google-oauth-url", body, "", &out); err != nil {
+	if err := c.postSigned(ctx, "/userapi/overseasv1/"+string(p)+"-oauth-url", body, "", &out); err != nil {
 		return "", "", err
 	}
 	return out.OAuthURL, out.State, nil
 }
 
-func (c *Client) GoogleOAuthLogin(ctx context.Context, deviceID, code, state string) (LoginResult, error) {
+func (c *Client) OAuthLogin(ctx context.Context, p Provider, deviceID, code, state string) (LoginResult, error) {
 	body := map[string]string{
 		"source_id": SourceID, "device_id": deviceID,
-		"code": code, "state": state, "navigate_uri": NavigateURI,
+		"code": code, "state": state, "navigate_uri": NavigateURIFor(p),
 	}
 	var out LoginResult
-	err := c.postSigned(ctx, "/userapi/overseasv1/google-oauth-login", body, "", &out)
+	err := c.postSigned(ctx, "/userapi/overseasv1/"+string(p)+"-oauth-login", body, "", &out)
 	return out, err
+}
+
+func (c *Client) GoogleOAuthURL(ctx context.Context, deviceID string) (string, string, error) {
+	return c.OAuthURL(ctx, ProviderGoogle, deviceID)
+}
+
+func (c *Client) GoogleOAuthLogin(ctx context.Context, deviceID, code, state string) (LoginResult, error) {
+	return c.OAuthLogin(ctx, ProviderGoogle, deviceID, code, state)
 }
 
 func (c *Client) Refresh(ctx context.Context, deviceID, accessToken, refreshToken string) (string, string, error) {

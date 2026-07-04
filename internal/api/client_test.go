@@ -63,7 +63,7 @@ func TestGoogleOAuthURL(t *testing.T) {
 		if body["source_id"] != "autoclaw" || body["device_id"] != "dev123" {
 			t.Errorf("body = %v", body)
 		}
-		if body["navigate_uri"] != NavigateURI {
+		if body["navigate_uri"] != NavigateURIFor(ProviderGoogle) {
 			t.Errorf("navigate_uri = %v", body["navigate_uri"])
 		}
 		if auth != "" {
@@ -89,7 +89,7 @@ func TestGoogleOAuthLogin(t *testing.T) {
 		if body["code"] != "auth-code" || body["state"] != "st1" {
 			t.Errorf("body = %v", body)
 		}
-		if body["navigate_uri"] != NavigateURI {
+		if body["navigate_uri"] != NavigateURIFor(ProviderGoogle) {
 			t.Errorf("navigate_uri = %v", body["navigate_uri"])
 		}
 		if auth != "" {
@@ -144,6 +144,48 @@ func TestRefresh_KeepsOldRefreshTokenWhenResponseEmpty(t *testing.T) {
 	}
 	if refresh != "Bearer keep-r" {
 		t.Errorf("refresh = %q, want fallback to input", refresh)
+	}
+}
+
+func TestOAuthURL_ZaiUsesZaiPathAndCallback(t *testing.T) {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
+		if path != "/userapi/overseasv1/zai-oauth-url" {
+			t.Errorf("path = %s", path)
+		}
+		if body["navigate_uri"] != "http://localhost:18432/auth/callback-zai" {
+			t.Errorf("navigate_uri = %v", body["navigate_uri"])
+		}
+		return map[string]any{"oauth_url": "https://chat.z.ai/x", "state": "st-z"}
+	})
+	defer done()
+	url, state, err := c.OAuthURL(context.Background(), ProviderZai, "dev1")
+	if err != nil || url != "https://chat.z.ai/x" || state != "st-z" {
+		t.Fatalf("got %q/%q err=%v", url, state, err)
+	}
+}
+
+func TestOAuthLogin_ZaiUsesZaiPath(t *testing.T) {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
+		if path != "/userapi/overseasv1/zai-oauth-login" {
+			t.Errorf("path = %s", path)
+		}
+		return map[string]any{"access_token": "Bearer a", "refresh_token": "Bearer r", "user_id": "u"}
+	})
+	defer done()
+	res, err := c.OAuthLogin(context.Background(), ProviderZai, "dev1", "code-1", "st-z")
+	if err != nil || res.AccessToken != "Bearer a" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestParseProvider(t *testing.T) {
+	for in, want := range map[string]Provider{"": ProviderGoogle, "google": ProviderGoogle, "zai": ProviderZai} {
+		if got, err := ParseProvider(in); err != nil || got != want {
+			t.Errorf("ParseProvider(%q) = %q,%v want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseProvider("evil/../path"); err == nil {
+		t.Error("expected error for unknown provider")
 	}
 }
 
