@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -40,7 +41,10 @@ func (c *Client) postSigned(ctx context.Context, path string, body any, bearer s
 		return err
 	}
 	defer resp.Body.Close()
-	return decodeEnvelope(resp.Body, out)
+	if err := decodeEnvelope(resp.Body, out); err != nil {
+		return fmt.Errorf("http %d: %w", resp.StatusCode, err)
+	}
+	return nil
 }
 
 type LoginResult struct {
