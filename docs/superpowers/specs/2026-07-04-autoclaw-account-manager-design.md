@@ -6,10 +6,12 @@
 
 ## 1. Overview
 
-A **local, self-hosted web dashboard** (single Go binary) to manage many AutoClaw
-accounts: log in via Google OAuth and keep access tokens fresh via background
-refresh. It reproduces AutoClaw's request signing and device identity so the
-AutoGLM backend treats it as a legitimate client.
+**GogoClaw** — a **local, self-hosted web dashboard** (single Go binary) to manage
+many AutoClaw accounts: log in via Google OAuth and keep access tokens fresh via
+background refresh. It reproduces AutoClaw's request signing and device identity so
+the AutoGLM backend treats it as a legitimate client.
+
+Go module: `gogoclaw`. Binary: `gogoclaw`.
 
 "Web" means a browser-based dashboard served locally — **not** a publicly hosted
 multi-user service. The whole thing runs on the operator's own machine because the
@@ -116,8 +118,8 @@ Browser (dashboard, React/TanStack)
 ## 4. Components & interfaces
 
 ```
-autoclaw-manager/
-├── cmd/manager/main.go          # wiring + start server
+gogoclaw/                        # go module: gogoclaw
+├── cmd/gogoclaw/main.go         # wiring + start server
 ├── internal/
 │   ├── api/       # AutoGLM client (signing + endpoints)
 │   ├── identity/  # device_id (ed25519)
@@ -227,11 +229,19 @@ discarded. Concurrency capped; per-account failures reported without aborting th
 
 ## 6. Web UI (TanStack) & design direction
 
-**Stack:** Vite + React + TypeScript, **TanStack Query** (fetch/cache/auto-refetch),
-**TanStack Table** (sortable/filterable account table), Tailwind. `vite build` →
-`web/dist` → `go:embed` → served at `:18432/`. Single binary output; Node toolchain
-is dev-only. Realtime: one SSE connection; on `login:*` / `refresh:*` events call
-`queryClient.invalidateQueries(['accounts'])`.
+**Stack (verified via context7):** Vite + React + TypeScript, **TanStack Query v5**
+(`@tanstack/react-query`: `QueryClientProvider`, `useQuery({queryKey,queryFn})`,
+`useMutation`, `queryClient.invalidateQueries({queryKey})`), **TanStack Table v8
+stable** (`@tanstack/react-table`: `useReactTable` + `getCoreRowModel` /
+`getSortedRowModel` / `getFilteredRowModel` + `flexRender` — **not** the v9 `@beta`
+`useTable`/`tableFeatures` API), **Tailwind CSS v4** (`tailwindcss` +
+`@tailwindcss/vite` plugin in `vite.config.ts`, `@import "tailwindcss";` in the CSS
+entry — no PostCSS/`tailwind.config.js` needed), **Phosphor Icons**
+(`@phosphor-icons/react`: named `*Icon` components, `weight` prop
+thin|light|regular|bold|fill|duotone, defaults via `IconContext.Provider`).
+`vite build` → `web/dist` → `go:embed` → served at `:18432/`. Single binary output;
+Node toolchain is dev-only. Realtime: one SSE connection; on `login:*` / `refresh:*`
+events call `queryClient.invalidateQueries({queryKey:['accounts']})`.
 
 **Design register:** product/tool (design serves the task; earned familiarity, the
 tool disappears into the work — Linear/Raycast/Stripe bar).
@@ -288,10 +298,27 @@ during implementation via the `impeccable` skill; this section fixes the directi
 - `refresh`: due-selection logic with fake clock.
 - End-to-end manual login smoke test against the live API (one real account).
 
-## 10. Tech stack summary
-- Go stdlib `net/http`; `modernc.org/sqlite` (pure Go); `chromedp` (auto driver only).
-- Frontend: Vite + React + TS + TanStack Query/Table + Tailwind, embedded via `go:embed`.
-- Build: `vite build` then `go build` → one static binary + `accounts.db`.
+## 10. Tech stack summary (all versions/APIs verified via context7)
+
+**Go (backend):**
+| Dependency | Import / usage | Notes |
+|---|---|---|
+| stdlib `net/http` | — | server, SSE, callback |
+| `modernc.org/sqlite` | `import _ "modernc.org/sqlite"`; `sql.Open("sqlite", dsn)` | pure Go, **no cgo**; driver name is `"sqlite"`; DSN supports `?_pragma=...` |
+| `github.com/chromedp/chromedp` | `NewContext`, `Run`, `Navigate`, `WaitVisible`, `SendKeys`, `Click` (`ByID`/`ByQuery`), `Location` | auto driver only; needs Chrome/Chromium; use `context.WithTimeout` + exec-allocator for headless |
+| stdlib `crypto/ed25519`, `crypto/sha256`, `crypto/md5`, `encoding/base64` | — | identity, signing, JWT claim decode |
+
+**Frontend (dev toolchain only; output embedded):**
+| Dependency | Package | Notes |
+|---|---|---|
+| Vite + React + TS | `npm create vite@latest` (react-ts) | build → `web/dist` |
+| TanStack Query | `@tanstack/react-query` (v5) | `useQuery`/`useMutation`/`invalidateQueries` |
+| TanStack Table | `@tanstack/react-table` (v8 **stable**, not v9 beta) | `useReactTable` + row models + `flexRender` |
+| Tailwind CSS | `tailwindcss` + `@tailwindcss/vite` (v4) | plugin in `vite.config.ts`; `@import "tailwindcss";` |
+| Phosphor Icons | `@phosphor-icons/react` | `*Icon` components, `weight` prop, `IconContext.Provider` |
+
+**Build:** `vite build` (→ `web/dist`) then `go build ./cmd/gogoclaw` → one static
+binary + `accounts.db` at runtime.
 
 ## 11. Open questions / future
 - Encrypt `accounts.db` at rest?
