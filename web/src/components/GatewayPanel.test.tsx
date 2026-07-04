@@ -57,6 +57,34 @@ describe("GatewayPanel", () => {
       expect(post).toBeDefined();
       const body = JSON.parse((post![1] as RequestInit).body as string);
       expect(body.mode).toBe("round_robin");
+      // Blank key field is omitted so the backend keeps the existing key.
+      expect(body).not.toHaveProperty("api_key");
+    });
+  });
+
+  it("clears the key with an explicit empty api_key", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ mode: "sticky", n: 5, api_key_set: true, eligible_count: 1, current: "" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValue(
+        new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    render(wrap(<GatewayPanel />));
+    await waitFor(() => expect(screen.getByRole("button", { name: /clear key/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /clear key/i }));
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === "POST");
+      expect(post).toBeDefined();
+      const body = JSON.parse((post![1] as RequestInit).body as string);
+      expect(body.api_key).toBe("");
     });
   });
 });

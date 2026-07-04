@@ -83,18 +83,36 @@ func TestProxyAuthRejectsWrongKey(t *testing.T) {
 	}
 }
 
-func TestSetConfigBlankKeyKeepsExisting(t *testing.T) {
+func TestSetConfigOmittedKeyKeepsExisting(t *testing.T) {
 	gw, st := newGateway(t)
 	st.SetProxyConfig(store.ProxyConfig{Mode: "sticky", N: 5, APIKey: "keepme"})
 	h := serve(gw)
 	rr := httptest.NewRecorder()
+	// No api_key field: keep the existing key, update the mode.
 	h.ServeHTTP(rr, httptest.NewRequest("POST", "/api/proxy/config",
-		strings.NewReader(`{"mode":"round_robin","n":2,"api_key":""}`)))
+		strings.NewReader(`{"mode":"round_robin","n":2}`)))
 	if rr.Code != 200 {
 		t.Fatalf("status %d", rr.Code)
 	}
 	got, _ := st.GetProxyConfig()
 	if got.APIKey != "keepme" || got.Mode != "round_robin" {
 		t.Fatalf("config = %+v, want key preserved + mode updated", got)
+	}
+}
+
+func TestSetConfigEmptyKeyClears(t *testing.T) {
+	gw, st := newGateway(t)
+	st.SetProxyConfig(store.ProxyConfig{Mode: "sticky", N: 5, APIKey: "hehe"})
+	h := serve(gw)
+	rr := httptest.NewRecorder()
+	// Explicit empty api_key clears it (open the proxy).
+	h.ServeHTTP(rr, httptest.NewRequest("POST", "/api/proxy/config",
+		strings.NewReader(`{"mode":"sticky","n":5,"api_key":""}`)))
+	if rr.Code != 200 {
+		t.Fatalf("status %d", rr.Code)
+	}
+	got, _ := st.GetProxyConfig()
+	if got.APIKey != "" {
+		t.Fatalf("expected key cleared, got %q", got.APIKey)
 	}
 }

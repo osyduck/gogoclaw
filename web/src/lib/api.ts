@@ -91,9 +91,12 @@ export async function getProxyConfig(): Promise<ProxyConfigView> {
 }
 
 export async function saveProxyConfig(c: ProxyConfigUpdate): Promise<void> {
+  // Omit api_key entirely to keep the existing one; send "" to clear it.
+  const body: { mode: string; n: number; api_key?: string } = { mode: c.mode, n: c.n };
+  if (c.apiKey !== undefined) body.api_key = c.apiKey;
   await req("/api/proxy/config", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ mode: c.mode, n: c.n, api_key: c.apiKey }),
+    body: JSON.stringify(body),
   });
 }

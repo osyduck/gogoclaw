@@ -45,5 +45,6 @@ export interface ProxyConfigView {
 export interface ProxyConfigUpdate {
   mode: RotationMode;
   n: number;
-  apiKey: string;
+  // undefined = keep existing key; "" = clear it; non-empty = set it.
+  apiKey?: string;
 }

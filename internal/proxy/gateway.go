@@ -89,9 +89,9 @@ func (g *Gateway) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode   string `json:"mode"`
-		N      int    `json:"n"`
-		APIKey string `json:"api_key"`
+		Mode   string  `json:"mode"`
+		N      int     `json:"n"`
+		APIKey *string `json:"api_key"` // omitted = keep; "" = clear; "x" = set
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -106,13 +106,14 @@ func (g *Gateway) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	if req.N < 1 {
 		req.N = 1
 	}
-	// A blank api_key means "keep the existing one" (the key is never echoed to
-	// the client, so the UI can't round-trip it).
-	key := req.APIKey
-	if key == "" {
-		if cur, err := g.st.GetProxyConfig(); err == nil {
-			key = cur.APIKey
-		}
+	// api_key omitted (nil) means "keep the existing one" (the key is never
+	// echoed to the client, so a blank field can't round-trip it). An explicit
+	// "" clears it; a non-empty value sets it.
+	var key string
+	if req.APIKey != nil {
+		key = *req.APIKey
+	} else if cur, err := g.st.GetProxyConfig(); err == nil {
+		key = cur.APIKey
 	}
 	if err := g.st.SetProxyConfig(store.ProxyConfig{Mode: req.Mode, N: req.N, APIKey: key}); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

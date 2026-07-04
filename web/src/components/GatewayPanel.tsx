@@ -73,12 +73,30 @@ export function GatewayPanel() {
 
         <button
           type="button"
-          onClick={() => save.mutate({ mode, n, apiKey })}
+          onClick={() => {
+            // Blank field keeps the existing key (omit); typed value sets it.
+            save.mutate({ mode, n, apiKey: apiKey === "" ? undefined : apiKey });
+            setApiKey("");
+          }}
           disabled={save.isPending}
           className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50"
         >
           {save.isPending ? "Saving…" : "Save"}
         </button>
+
+        {cfg.data?.apiKeySet && (
+          <button
+            type="button"
+            onClick={() => {
+              save.mutate({ mode, n, apiKey: "" }); // explicit clear
+              setApiKey("");
+            }}
+            disabled={save.isPending}
+            className="rounded-lg border border-border px-3 py-2 text-sm text-err hover:opacity-80 focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50"
+          >
+            Clear key
+          </button>
+        )}
       </div>
 
       <p className="mt-3 text-xs text-muted">
