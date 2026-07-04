@@ -31,3 +31,19 @@ export interface GogoEvent {
   email?: string;
   detail?: string;
 }
+
+export type RotationMode = "sticky" | "round_robin" | "rotate_after_n";
+
+export interface ProxyConfigView {
+  mode: RotationMode;
+  n: number;
+  apiKeySet: boolean;
+  eligibleCount: number;
+  current: string;
+}
+
+export interface ProxyConfigUpdate {
+  mode: RotationMode;
+  n: number;
+  apiKey: string;
+}
