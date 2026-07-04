@@ -1,0 +1,35 @@
+package store
+
+import "time"
+
+const (
+	StatusActive        = "active"
+	StatusRefreshFailed = "refresh_failed"
+	StatusNeedsRelogin  = "needs_relogin"
+)
+
+// Account is a stored AutoClaw account with its live tokens and device identity.
+type Account struct {
+	Email            string
+	UserID           string
+	DeviceID         string
+	AccessToken      string
+	RefreshToken     string
+	AccessExpiresAt  time.Time
+	RefreshExpiresAt time.Time
+	PrivPEM          string
+	PubPEM           string
+	AddedAt          time.Time
+	LastRefreshedAt  time.Time
+	Status           string
+}
+
+// Store persists accounts.
+type Store interface {
+	Add(Account) error
+	List() ([]Account, error)
+	Get(email string) (Account, error)
+	UpdateTokens(email, access, refresh string, aexp, rexp time.Time) error
+	SetStatus(email, status string) error
+	Delete(email string) error
+}
