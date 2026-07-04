@@ -133,6 +133,20 @@ func TestRefresh(t *testing.T) {
 	}
 }
 
+func TestRefresh_KeepsOldRefreshTokenWhenResponseEmpty(t *testing.T) {
+	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
+		return map[string]any{"access_token": "Bearer new-a", "refresh_token": "", "refresh": false}
+	})
+	defer done()
+	_, refresh, err := c.Refresh(context.Background(), "dev123", "Bearer old-a", "Bearer keep-r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refresh != "Bearer keep-r" {
+		t.Errorf("refresh = %q, want fallback to input", refresh)
+	}
+}
+
 func TestUserProfile(t *testing.T) {
 	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/v1/user-profile" {

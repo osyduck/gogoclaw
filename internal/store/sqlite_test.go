@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -155,6 +156,17 @@ func TestOpen_MemoryDSNStillParses(t *testing.T) {
 	defer s.Close()
 	if err := s.Add(sampleAccount()); err != nil {
 		t.Fatalf("Add on in-memory store: %v", err)
+	}
+}
+
+func TestGet_MissingIsErrNotFound(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.Get("nobody@example.com")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get missing: got %v, want ErrNotFound", err)
+	}
+	if err := s.SetStatus("nobody@example.com", StatusActive); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetStatus missing: got %v, want ErrNotFound", err)
 	}
 }
 

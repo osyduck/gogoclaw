@@ -92,7 +92,11 @@ func (c *Client) Refresh(ctx context.Context, deviceID, accessToken, refreshToke
 	if err := c.postSigned(ctx, "/userapi/v1/refresh", body, accessToken, &out); err != nil {
 		return "", "", err
 	}
-	return out.AccessToken, out.RefreshToken, nil
+	newRefresh := out.RefreshToken
+	if newRefresh == "" {
+		newRefresh = refreshToken // API may omit a new refresh token; keep the existing one
+	}
+	return out.AccessToken, newRefresh, nil
 }
 
 func (c *Client) UserProfile(ctx context.Context, deviceID, accessToken string) (Profile, error) {
