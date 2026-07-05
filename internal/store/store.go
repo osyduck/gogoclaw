@@ -43,4 +43,6 @@ type Store interface {
 	Delete(email string) error
 	GetProxyConfig() (ProxyConfig, error)
 	SetProxyConfig(ProxyConfig) error
+	GetLoginProxies() ([]string, error)
+	SetLoginProxies([]string) error
 }
