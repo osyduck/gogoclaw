@@ -64,7 +64,7 @@ test("bulkLogin sends the selected provider", async () => {
 });
 
 test("bulkLogin sends use_proxy_pool in the body", async () => {
-  const fetchMock = vi.fn(async () => new Response(
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
     JSON.stringify({ started: [], errors: [] }),
     { status: 200, headers: { "content-type": "application/json" } },
   ));
@@ -84,7 +84,7 @@ test("getLoginProxies maps the pool response", async () => {
 });
 
 test("saveLoginProxies posts the proxies array", async () => {
-  const fetchMock = vi.fn(async () => new Response(
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
     JSON.stringify({ status: "ok" }),
     { status: 200, headers: { "content-type": "application/json" } },
   ));

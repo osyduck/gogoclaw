@@ -42,7 +42,8 @@ test("posts creds, then polls each login to a terminal per-account status", asyn
   await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.objectContaining({ method: "POST" })));
-  const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  const sentCall = fetchMock.mock.calls.find((c) => c[0] === "/api/login/bulk")!;
+  const sent = JSON.parse((sentCall[1] as RequestInit).body as string);
   expect(sent.accounts).toEqual([
     { email: "a@x.com", password: "pw1" },
     { email: "b@x.com", password: "pw2" },
@@ -91,8 +92,8 @@ test("shows a server-rejected account as failed without polling it", async () =>
 
   await waitFor(() => expect(screen.getByText("bad@x.com")).toBeInTheDocument());
   expect(screen.getByText(/1 failed/i)).toBeInTheDocument();
-  // Only the bulk POST is called; a row that never started is not polled.
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // A row that never started is not polled (no status?state= fetch happened).
+  expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("state="))).toBe(false);
 });
 
 test("defaults to Direct Google and can switch to via chat.z.ai", async () => {
@@ -106,8 +107,39 @@ test("defaults to Direct Google and can switch to via chat.z.ai", async () => {
   await userEvent.click(screen.getByRole("radio", { name: /chat\.z\.ai/i }));
   await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.anything()));
-  const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  const bulkCall = fetchMock.mock.calls.find((c) => c[0] === "/api/login/bulk")!;
+  const body = JSON.parse((bulkCall[1] as RequestInit).body as string);
   expect(body.provider).toBe("zai");
+});
+
+test("proxy-pool toggle is enabled and sends use_proxy_pool when a pool exists", async () => {
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    if (url === "/api/login/proxy-pool") return json({ proxies: ["http://p:8080"], count: 1 });
+    if (url === "/api/login/bulk") return json({ started: [], errors: [] });
+    return json({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<BulkLogin onClose={() => {}} pollMs={10} />);
+  const cb = await screen.findByRole("checkbox", { name: /proxy pool/i });
+  expect(cb).toBeEnabled();
+  await userEvent.click(cb);
+  await userEvent.type(screen.getByLabelText(/credentials/i), "a@x.com:pw");
+  await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.anything()));
+  const call = fetchMock.mock.calls.find((c) => c[0] === "/api/login/bulk")!;
+  expect(JSON.parse((call[1] as RequestInit).body as string).use_proxy_pool).toBe(true);
+});
+
+test("proxy-pool toggle is disabled when no proxies are configured", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url === "/api/login/proxy-pool") return json({ proxies: [], count: 0 });
+    return json({});
+  }));
+  render(<BulkLogin onClose={() => {}} pollMs={10} />);
+  const cb = await screen.findByRole("checkbox", { name: /proxy pool/i });
+  expect(cb).toBeDisabled();
 });
 
 test("surfaces a helpful hint when auto-login is not configured", async () => {
@@ -138,6 +170,7 @@ test("preserves the full password when it contains a colon", async () => {
   await userEvent.click(screen.getByRole("button", { name: /start bulk login/i }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/login/bulk", expect.objectContaining({ method: "POST" })));
-  const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  const sentCall = fetchMock.mock.calls.find((c) => c[0] === "/api/login/bulk")!;
+  const sent = JSON.parse((sentCall[1] as RequestInit).body as string);
   expect(sent.accounts).toEqual([{ email: "x@y.com", password: "p:a$$w:ord" }]);
 });

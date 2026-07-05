@@ -1,6 +1,6 @@
 import { CheckCircleIcon, CircleNotchIcon, ClockIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
-import { bulkLogin, loginStatus } from "../lib/api";
+import { bulkLogin, getLoginProxies, loginStatus } from "../lib/api";
 import type { Provider } from "../lib/types";
 
 // parseCreds turns "email:password" lines into credential objects, skipping blanks.
@@ -40,7 +40,15 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [useProxyPool, setUseProxyPool] = useState(false);
+  const [poolCount, setPoolCount] = useState(0);
   const startedAt = useRef(0);
+
+  useEffect(() => {
+    getLoginProxies()
+      .then((p) => setPoolCount(p.count))
+      .catch(() => setPoolCount(0));
+  }, []);
 
   async function submit() {
     setError(null);
@@ -51,7 +59,7 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
     }
     setBusy(true);
     try {
-      const res = await bulkLogin(creds, provider);
+      const res = await bulkLogin(creds, provider, useProxyPool && poolCount > 0);
       startedAt.current = Date.now();
       setRows([
         ...res.started.map((s): Row => ({ email: s.email, state: s.state, status: "pending" })),
@@ -146,6 +154,19 @@ export function BulkLogin({ onClose, pollMs = 2000, timeoutMs = 180_000 }: Props
             </label>
           ))}
         </fieldset>
+
+        <label className="mt-3 flex items-center gap-2 text-sm text-muted">
+          <input
+            type="checkbox"
+            checked={useProxyPool}
+            disabled={poolCount === 0}
+            onChange={(e) => setUseProxyPool(e.target.checked)}
+          />
+          Route AutoGLM API through proxy pool
+          <span className="text-xs">
+            {poolCount === 0 ? "(no proxies configured)" : `(${poolCount} ${poolCount === 1 ? "proxy" : "proxies"})`}
+          </span>
+        </label>
 
         {error && <p className="mt-3 text-sm text-err">{error}</p>}
 
