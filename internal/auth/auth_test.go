@@ -235,6 +235,101 @@ func TestStartLogin_RecordsDriverSteps(t *testing.T) {
 	}
 }
 
+func TestTryVia_NoPoolCallsPlainClientOnce(t *testing.T) {
+	e := New(api.NewClient(), nil, nil)
+	var attempts int
+	err := e.tryVia(nil, nil, func(*api.Client) error { attempts++; return nil })
+	if err != nil || attempts != 1 {
+		t.Fatalf("attempts=%d err=%v, want 1,nil", attempts, err)
+	}
+}
+
+func TestTryVia_FailsOverOn630014(t *testing.T) {
+	e := New(api.NewClient(), nil, nil)
+	order := []string{"http://p1:8080", "http://p2:8080", "http://p3:8080"}
+	var attempts int
+	err := e.tryVia(order, nil, func(*api.Client) error {
+		attempts++
+		if attempts < 2 {
+			return &api.APIError{Code: api.CodeVerificationFailed, Msg: "Verification failed"}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("want success after one failover, got %v", err)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts=%d, want 2", attempts)
+	}
+}
+
+func TestTryVia_TerminalErrorStopsImmediately(t *testing.T) {
+	e := New(api.NewClient(), nil, nil)
+	order := []string{"http://p1:8080", "http://p2:8080"}
+	var attempts int
+	err := e.tryVia(order, nil, func(*api.Client) error {
+		attempts++
+		return &api.APIError{Code: 400001, Msg: "bad request"}
+	})
+	if err == nil || attempts != 1 {
+		t.Fatalf("attempts=%d err=%v, want 1 and terminal error", attempts, err)
+	}
+}
+
+func TestTryVia_ExhaustsPoolThenReturnsLastError(t *testing.T) {
+	e := New(api.NewClient(), nil, nil)
+	order := []string{"http://p1:8080", "http://p2:8080"}
+	var attempts int
+	err := e.tryVia(order, nil, func(*api.Client) error {
+		attempts++
+		return &api.APIError{Code: api.CodeVerificationFailed, Msg: "Verification failed"}
+	})
+	if err == nil || attempts != 2 {
+		t.Fatalf("attempts=%d err=%v, want 2 and the last error", attempts, err)
+	}
+}
+
+func TestNextProxyOrder_RoundRobinRotation(t *testing.T) {
+	e, st := newEngine(t, func(w http.ResponseWriter, r *http.Request) {})
+	if err := st.SetLoginProxies([]string{"http://a:1", "http://b:2", "http://c:3"}); err != nil {
+		t.Fatal(err)
+	}
+	first := e.nextProxyOrder()
+	second := e.nextProxyOrder()
+	if len(first) != 3 || first[0] != "http://a:1" {
+		t.Fatalf("first order = %v", first)
+	}
+	if len(second) != 3 || second[0] != "http://b:2" {
+		t.Fatalf("second order = %v, want to start at the next proxy", second)
+	}
+}
+
+// TestStartLogin_ProxyPoolRoutesThroughProxy proves the toggle actually routes
+// AutoGLM calls through the pool: with a single unreachable proxy, the OAuthURL
+// call fails (so StartLogin errors), whereas the same flow with the pool off
+// succeeds via the direct base server.
+func TestStartLogin_ProxyPoolRoutesThroughProxy(t *testing.T) {
+	e, st := newEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+			"data": map[string]any{"oauth_url": "u", "state": "st-p"}})
+	})
+	if err := st.SetLoginProxies([]string{"http://127.0.0.1:1"}); err != nil { // refused
+		t.Fatal(err)
+	}
+
+	// Pool ON → routed through the dead proxy → StartLogin fails.
+	on := &GoogleCred{Email: "a@x.com", Password: "pw", UseProxyPool: true}
+	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderGoogle, on); err == nil {
+		t.Error("want error when routing through an unreachable proxy")
+	}
+
+	// Pool OFF → direct base server → StartLogin succeeds.
+	off := &GoogleCred{Email: "b@x.com", Password: "pw", UseProxyPool: false}
+	if _, _, err := e.StartLogin(context.Background(), ManualDriver{}, api.ProviderGoogle, off); err != nil {
+		t.Errorf("pool off should use the direct base: %v", err)
+	}
+}
+
 func TestHandleCallback_UnknownState(t *testing.T) {
 	e, _ := newEngine(t, func(w http.ResponseWriter, r *http.Request) {})
 	if err := e.HandleCallback(context.Background(), "c", "does-not-exist"); err == nil {
