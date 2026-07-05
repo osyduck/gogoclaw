@@ -48,3 +48,8 @@ export interface ProxyConfigUpdate {
   // undefined = keep existing key; "" = clear it; non-empty = set it.
   apiKey?: string;
 }
+
+export interface LoginProxyPool {
+  proxies: string[];
+  count: number;
+}

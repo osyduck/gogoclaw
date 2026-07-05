@@ -1,5 +1,6 @@
 import type {
   Account,
+  LoginProxyPool,
   LoginSession,
   LoginStart,
   Provider,
@@ -65,12 +66,26 @@ export interface BulkResult {
 export async function bulkLogin(
   creds: { email: string; password: string }[],
   provider: Provider = "google",
+  useProxyPool = false,
 ): Promise<BulkResult> {
   return (await req("/api/login/bulk", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ accounts: creds, provider }),
+    body: JSON.stringify({ accounts: creds, provider, use_proxy_pool: useProxyPool }),
   })) as BulkResult;
+}
+
+export async function getLoginProxies(): Promise<LoginProxyPool> {
+  const r = (await req("/api/login/proxy-pool")) as { proxies: string[]; count: number };
+  return { proxies: r.proxies ?? [], count: r.count ?? 0 };
+}
+
+export async function saveLoginProxies(proxies: string[]): Promise<void> {
+  await req("/api/login/proxy-pool", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ proxies }),
+  });
 }
 
 export async function getProxyConfig(): Promise<ProxyConfigView> {

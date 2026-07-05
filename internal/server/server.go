@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +48,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login/start", s.handleLoginStart)
 	mux.HandleFunc("POST /api/login/bulk", s.handleBulkLogin)
 	mux.HandleFunc("GET /api/login/status", s.handleLoginStatus)
+	mux.HandleFunc("GET /api/login/proxy-pool", s.handleGetLoginProxies)
+	mux.HandleFunc("POST /api/login/proxy-pool", s.handleSetLoginProxies)
 	mux.HandleFunc("GET /api/accounts", s.handleAccounts)
 	mux.HandleFunc("POST /api/accounts/refresh-all", s.handleRefreshAll)
 	mux.HandleFunc("POST /api/accounts/{email}/refresh", s.handleRefreshOne)
@@ -99,6 +103,62 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"state": state, "oauth_url": url})
+}
+
+// validateProxyURL checks a proxy entry parses and uses a supported scheme.
+func validateProxyURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid proxy url %q: %v", raw, err)
+	}
+	switch u.Scheme {
+	case "http", "https", "socks5":
+	default:
+		return fmt.Errorf("proxy %q: scheme must be http, https, or socks5", raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("proxy %q: missing host", raw)
+	}
+	return nil
+}
+
+func (s *Server) handleGetLoginProxies(w http.ResponseWriter, r *http.Request) {
+	proxies, err := s.store.GetLoginProxies()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if proxies == nil {
+		proxies = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proxies": proxies, "count": len(proxies)})
+}
+
+func (s *Server) handleSetLoginProxies(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Proxies []string `json:"proxies"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	cleaned := make([]string, 0, len(req.Proxies))
+	for _, p := range req.Proxies {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if err := validateProxyURL(p); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		cleaned = append(cleaned, p)
+	}
+	if err := s.store.SetLoginProxies(cleaned); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleLoginStatus(w http.ResponseWriter, r *http.Request) {
@@ -230,8 +290,9 @@ func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Provider string            `json:"provider"`
-		Accounts []auth.GoogleCred `json:"accounts"`
+		Provider     string            `json:"provider"`
+		Accounts     []auth.GoogleCred `json:"accounts"`
+		UseProxyPool bool              `json:"use_proxy_pool"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Accounts) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected non-empty accounts array"})
@@ -264,6 +325,7 @@ func (s *Server) handleBulkLogin(w http.ResponseWriter, r *http.Request) {
 	)
 	driver := s.autoLogin.Driver()
 	for i := range req.Accounts {
+		req.Accounts[i].UseProxyPool = req.UseProxyPool
 		cred := req.Accounts[i]
 		wg.Add(1)
 		sem <- struct{}{}

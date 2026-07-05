@@ -39,3 +39,11 @@ func TestDecodeEnvelope_ReturnsTypedAPIError(t *testing.T) {
 		t.Errorf("apiErr = %+v", apiErr)
 	}
 }
+
+func TestDecodeEnvelope_SurfacesVerificationFailedCode(t *testing.T) {
+	err := decodeEnvelope(strings.NewReader(`{"code":630014,"msg":"Verification failed","data":null}`), nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != CodeVerificationFailed {
+		t.Fatalf("err = %v, want *APIError with code %d", err, CodeVerificationFailed)
+	}
+}

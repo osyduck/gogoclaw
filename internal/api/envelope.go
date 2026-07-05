@@ -14,6 +14,11 @@ type APIError struct {
 
 func (e *APIError) Error() string { return fmt.Sprintf("api error %d: %s", e.Code, e.Msg) }
 
+// CodeVerificationFailed is the AutoGLM business code returned when the caller's
+// IP is rejected during OAuth ("Verification failed"). Used to trigger proxy
+// failover when adding an account.
+const CodeVerificationFailed = 630014
+
 type envelope struct {
 	Code int             `json:"code"`
 	Msg  string          `json:"msg"`

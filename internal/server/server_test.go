@@ -70,6 +70,85 @@ func newServerWithAuto(t *testing.T, autoglm http.HandlerFunc, al AutoLogin) htt
 	return New(auth.New(c, st, bus), refresh.New(c, st, bus), st, bus, al, gw).Handler()
 }
 
+func okOAuthURL(w http.ResponseWriter, r *http.Request) {
+	_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS",
+		"data": map[string]any{"oauth_url": "u", "state": "st-" + r.URL.Path}})
+}
+
+func TestLoginProxyPool_GetSetRoundTrip(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/proxy-pool",
+		strings.NewReader(`{"proxies":["http://u:p@1.2.3.4:8080"," "," socks5://5.6.7.8:1080 "]}`)))
+	if rec.Code != 200 {
+		t.Fatalf("POST code = %d body = %s", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/login/proxy-pool", nil))
+	if rec.Code != 200 {
+		t.Fatalf("GET code = %d", rec.Code)
+	}
+	var out struct {
+		Proxies []string `json:"proxies"`
+		Count   int      `json:"count"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Count != 2 || out.Proxies[0] != "http://u:p@1.2.3.4:8080" || out.Proxies[1] != "socks5://5.6.7.8:1080" {
+		t.Errorf("pool = %+v, want 2 trimmed entries", out)
+	}
+}
+
+func TestLoginProxyPool_RejectsInvalidURL(t *testing.T) {
+	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/proxy-pool",
+		strings.NewReader(`{"proxies":["ftp://nope"]}`)))
+	if rec.Code != 400 {
+		t.Errorf("code = %d, want 400 for a bad scheme", rec.Code)
+	}
+}
+
+// TestBulkLogin_UsesProxyPoolWhenFlagSet proves use_proxy_pool threads all the
+// way through: with a single unreachable proxy configured, an account started
+// with the flag fails (routed through the dead proxy), while the same account
+// without the flag starts fine via the direct base server.
+func TestBulkLogin_UsesProxyPoolWhenFlagSet(t *testing.T) {
+	al := &fakeAutoLogin{driver: stubDriver{}}
+	h := newServerWithAuto(t, okOAuthURL, al)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/proxy-pool",
+		strings.NewReader(`{"proxies":["http://127.0.0.1:1"]}`)))
+	if rec.Code != 200 {
+		t.Fatalf("configure pool: code = %d body = %s", rec.Code, rec.Body)
+	}
+
+	decode := func(body string) (started, errs int) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login/bulk", strings.NewReader(body)))
+		if rec.Code != 200 {
+			t.Fatalf("bulk code = %d body = %s", rec.Code, rec.Body)
+		}
+		var out struct {
+			Started []struct{ Email string } `json:"started"`
+			Errors  []struct{ Email string } `json:"errors"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return len(out.Started), len(out.Errors)
+	}
+
+	// Flag on → routed through the dead proxy → the account errors.
+	if s, e := decode(`{"accounts":[{"email":"a@x.com","password":"p"}],"use_proxy_pool":true}`); s != 0 || e != 1 {
+		t.Errorf("flag on: started=%d errors=%d, want 0/1", s, e)
+	}
+	// Flag off → direct base server → the account starts.
+	if s, e := decode(`{"accounts":[{"email":"b@x.com","password":"p"}],"use_proxy_pool":false}`); s != 1 || e != 0 {
+		t.Errorf("flag off: started=%d errors=%d, want 1/0", s, e)
+	}
+}
+
 func TestCallbackZaiRouteExists(t *testing.T) {
 	h, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "SUCCESS", "data": map[string]any{}})

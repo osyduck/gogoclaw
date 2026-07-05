@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"sync"
 	"time"
 
@@ -16,9 +17,10 @@ import (
 
 // GoogleCred is a one-time Google credential (used only by the Plan 4 auto driver).
 type GoogleCred struct {
-	Email    string
-	Password string
-	Proxy    string // optional residential proxy; empty = none
+	Email        string
+	Password     string
+	Proxy        string // optional residential proxy; empty = none
+	UseProxyPool bool   // route this account's AutoGLM API calls through the login proxy pool
 }
 
 // LoginDriver drives the consent step for a login. Manual = no-op (the UI opens
@@ -49,6 +51,7 @@ type Session struct {
 
 	identity identity.Identity
 	provider api.Provider
+	order    []string // proxy failover order for this login (nil = no pool)
 }
 
 // AuthEngine coordinates login sessions.
@@ -57,8 +60,9 @@ type AuthEngine struct {
 	store store.Store
 	bus   *events.Bus
 
-	mu      sync.Mutex
-	pending map[string]*Session
+	mu         sync.Mutex
+	pending    map[string]*Session
+	poolCursor int // round-robin index into the login proxy pool
 }
 
 func New(c *api.Client, st store.Store, bus *events.Bus) *AuthEngine {
@@ -73,11 +77,19 @@ func (e *AuthEngine) StartLogin(ctx context.Context, driver LoginDriver, provide
 	if err != nil {
 		return "", "", fmt.Errorf("generate identity: %w", err)
 	}
-	oauthURL, state, err := e.api.OAuthURL(ctx, provider, id.DeviceID)
-	if err != nil {
+	var order []string
+	if cred != nil && cred.UseProxyPool {
+		order = e.nextProxyOrder()
+	}
+	var oauthURL, state string
+	if err := e.tryVia(order, nil, func(c *api.Client) error {
+		var e2 error
+		oauthURL, state, e2 = c.OAuthURL(ctx, provider, id.DeviceID)
+		return e2
+	}); err != nil {
 		return "", "", fmt.Errorf("oauth url: %w", err)
 	}
-	sess := &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id, provider: provider}
+	sess := &Session{State: state, Status: "pending", CreatedAt: time.Now(), identity: id, provider: provider, order: order}
 	if cred != nil {
 		// Auto/bulk logins know the target email up front; recording it lets the
 		// UI show per-account progress and lets failures be attributed to a row.
@@ -128,7 +140,19 @@ func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) err
 		return errors.New(sessErr)
 	}
 
-	res, err := e.api.OAuthLogin(ctx, provider, sess.identity.DeviceID, code, state)
+	step := func(line string) {
+		e.mu.Lock()
+		if s, ok := e.pending[state]; ok {
+			s.Steps = append(s.Steps, line)
+		}
+		e.mu.Unlock()
+	}
+	var res api.LoginResult
+	err := e.tryVia(sess.order, step, func(c *api.Client) error {
+		var e2 error
+		res, e2 = c.OAuthLogin(ctx, provider, sess.identity.DeviceID, code, state)
+		return e2
+	})
 	if err != nil {
 		e.fail(state, err)
 		return err
@@ -155,7 +179,12 @@ func (e *AuthEngine) HandleCallback(ctx context.Context, code, state string) err
 	// Best-effort: seed the credit balance now so it shows immediately, rather
 	// than staying 0 until the background refresher first runs. A failure here
 	// must not fail an otherwise-successful login.
-	if w, err := e.api.Wallets(ctx, res.AccessToken); err != nil {
+	var w api.Wallet
+	if err := e.tryVia(sess.order, nil, func(c *api.Client) error {
+		var e2 error
+		w, e2 = c.Wallets(ctx, res.AccessToken)
+		return e2
+	}); err != nil {
 		log.Printf("balance %s: %v", claims.Email, err)
 	} else if err := e.store.UpdateBalance(claims.Email, w.TotalBalance); err != nil {
 		log.Printf("balance %s: store: %v", claims.Email, err)
@@ -194,4 +223,75 @@ func (e *AuthEngine) fail(state string, err error) {
 	}
 	e.mu.Unlock()
 	e.bus.Publish(events.Event{Type: "login:error", Email: email, Detail: err.Error()})
+}
+
+// nextProxyOrder snapshots the login proxy pool rotated by a round-robin cursor,
+// so successive accounts in a batch start on different proxies. Returns nil when
+// the pool is empty or unreadable (the flow then runs unproxied).
+func (e *AuthEngine) nextProxyOrder() []string {
+	proxies, err := e.store.GetLoginProxies()
+	if err != nil || len(proxies) == 0 {
+		return nil
+	}
+	e.mu.Lock()
+	start := e.poolCursor % len(proxies)
+	e.poolCursor++
+	e.mu.Unlock()
+	order := make([]string, 0, len(proxies))
+	for i := 0; i < len(proxies); i++ {
+		order = append(order, proxies[(start+i)%len(proxies)])
+	}
+	return order
+}
+
+// tryVia runs call, routing AutoGLM requests through each proxy in order until
+// one succeeds or a non-retryable error occurs. An empty order calls once with
+// the plain (direct) client. onStep, when non-nil, receives a progress line per
+// attempt so the UI can show failover live.
+func (e *AuthEngine) tryVia(order []string, onStep func(string), call func(*api.Client) error) error {
+	if len(order) == 0 {
+		return call(e.api)
+	}
+	var lastErr error
+	for i, p := range order {
+		client, err := e.api.WithProxy(p)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if onStep != nil {
+			onStep(fmt.Sprintf("attempt %d/%d via proxy %s", i+1, len(order), proxyHost(p)))
+		}
+		lastErr = call(client)
+		if lastErr == nil {
+			return nil
+		}
+		if !retryable(lastErr) {
+			return lastErr
+		}
+		if onStep != nil {
+			onStep(fmt.Sprintf("proxy %s rejected (%v) — trying next", proxyHost(p), lastErr))
+		}
+	}
+	return lastErr
+}
+
+// retryable reports whether an error should trigger failover to the next proxy:
+// a 630014 verification failure (flagged IP), or a transport-level error (dead
+// proxy). Any other business error is terminal.
+func retryable(err error) bool {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == api.CodeVerificationFailed
+	}
+	return true
+}
+
+// proxyHost returns the host:port of a proxy URL for display, dropping any
+// embedded credentials. Falls back to the raw string if it doesn't parse.
+func proxyHost(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return raw
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -19,6 +20,26 @@ func NewClient() *Client { return NewClientWithBase(BaseURL) }
 
 func NewClientWithBase(base string) *Client {
 	return &Client{http: &http.Client{Timeout: 30 * time.Second}, base: base}
+}
+
+// WithProxy returns a copy of the client whose HTTP requests are routed through
+// proxyURL (http/https/socks5). An empty proxyURL returns the receiver unchanged
+// (no proxy). A malformed proxyURL returns an error.
+func (c *Client) WithProxy(proxyURL string) (*Client, error) {
+	if proxyURL == "" {
+		return c, nil
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy url %q: %w", proxyURL, err)
+	}
+	return &Client{
+		http: &http.Client{
+			Timeout:   c.http.Timeout,
+			Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+		},
+		base: c.base,
+	}, nil
 }
 
 // postSigned marshals body, sends a signed POST to path, and decodes data into out.

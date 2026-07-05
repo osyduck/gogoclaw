@@ -41,6 +41,10 @@ var migrations = []string{
 	  n       INTEGER NOT NULL,
 	  api_key TEXT NOT NULL
 	)`,
+	`CREATE TABLE IF NOT EXISTS login_proxy_pool (
+	  id      INTEGER PRIMARY KEY CHECK (id = 1),
+	  proxies TEXT NOT NULL
+	)`,
 }
 
 // SQLiteStore is a pure-Go SQLite-backed Store.
@@ -189,6 +193,33 @@ func (s *SQLiteStore) SetProxyConfig(c ProxyConfig) error {
 INSERT INTO proxy_settings (id, mode, n, api_key) VALUES (1, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET mode=excluded.mode, n=excluded.n, api_key=excluded.api_key`,
 		c.Mode, c.N, c.APIKey)
+	return err
+}
+
+func (s *SQLiteStore) GetLoginProxies() ([]string, error) {
+	row := s.db.QueryRow(`SELECT proxies FROM login_proxy_pool WHERE id = 1`)
+	var raw string
+	err := row.Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) SetLoginProxies(proxies []string) error {
+	raw := strings.Join(proxies, "\n")
+	_, err := s.db.Exec(`
+INSERT INTO login_proxy_pool (id, proxies) VALUES (1, ?)
+ON CONFLICT(id) DO UPDATE SET proxies=excluded.proxies`, raw)
 	return err
 }
 

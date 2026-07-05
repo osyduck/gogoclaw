@@ -10,6 +10,7 @@ import { BulkLogin } from "./components/BulkLogin";
 import { StatTiles } from "./components/StatTiles";
 import { EmptyState } from "./components/EmptyState";
 import { GatewayPanel } from "./components/GatewayPanel";
+import { LoginProxyPanel } from "./components/LoginProxyPanel";
 
 function Dashboard() {
   useServerEvents();
@@ -67,8 +68,9 @@ function Dashboard() {
         )}
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 space-y-6">
         <GatewayPanel />
+        <LoginProxyPanel />
       </div>
       {bulkOpen && <BulkLogin onClose={() => setBulkOpen(false)} />}
     </div>

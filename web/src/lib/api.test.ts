@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { listAccounts, startManualLogin, refreshAccount, deleteAccount, bulkLogin } from "./api";
+import { listAccounts, startManualLogin, refreshAccount, deleteAccount, bulkLogin, getLoginProxies, saveLoginProxies } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -61,4 +61,37 @@ test("bulkLogin sends the selected provider", async () => {
   await bulkLogin([{ email: "a@x.com", password: "pw" }], "zai");
   const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
   expect(body.provider).toBe("zai");
+});
+
+test("bulkLogin sends use_proxy_pool in the body", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+    JSON.stringify({ started: [], errors: [] }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  await bulkLogin([{ email: "a@x.com", password: "pw" }], "google", true);
+  const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  expect(body.use_proxy_pool).toBe(true);
+});
+
+test("getLoginProxies maps the pool response", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(
+    JSON.stringify({ proxies: ["http://a:8080"], count: 1 }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  )));
+  const pool = await getLoginProxies();
+  expect(pool).toEqual({ proxies: ["http://a:8080"], count: 1 });
+});
+
+test("saveLoginProxies posts the proxies array", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(
+    JSON.stringify({ status: "ok" }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  await saveLoginProxies(["http://a:8080", "socks5://b:1080"]);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/login/proxy-pool");
+  expect((init as RequestInit).method).toBe("POST");
+  expect(JSON.parse((init as RequestInit).body as string).proxies).toEqual(["http://a:8080", "socks5://b:1080"]);
 });

@@ -266,6 +266,73 @@ func TestMissingEmail_ReturnsNotFoundError(t *testing.T) {
 	}
 }
 
+func TestLoginProxies_RoundTrip(t *testing.T) {
+	s := newTestStore(t)
+
+	got, err := s.GetLoginProxies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("default = %v, want empty", got)
+	}
+
+	want := []string{"http://u:p@1.2.3.4:8080", "socks5://5.6.7.8:1080"}
+	if err := s.SetLoginProxies(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetLoginProxies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("round-trip = %v, want %v", got, want)
+	}
+}
+
+func TestLoginProxies_DropsBlankLines(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.SetLoginProxies([]string{"http://a:8080", "", "   "}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetLoginProxies()
+	if len(got) != 1 || got[0] != "http://a:8080" {
+		t.Fatalf("got %v, want one non-blank entry", got)
+	}
+}
+
+func TestOpen_MigratesLoginProxyPoolTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE accounts (
+	  email TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
+	  access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
+	  access_expires_at INTEGER NOT NULL, refresh_expires_at INTEGER NOT NULL,
+	  priv_pem TEXT NOT NULL, pub_pem TEXT NOT NULL,
+	  added_at INTEGER NOT NULL, last_refreshed_at INTEGER NOT NULL, status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open legacy db: %v", err)
+	}
+	defer s.Close()
+	if _, err := s.GetLoginProxies(); err != nil {
+		t.Fatalf("GetLoginProxies after migration: %v", err)
+	}
+	if err := s.SetLoginProxies([]string{"http://a:8080"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetLoginProxies(); len(got) != 1 {
+		t.Errorf("got %v, want 1", got)
+	}
+}
+
 func TestProxyConfigDefaultsAndRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
