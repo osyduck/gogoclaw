@@ -55,6 +55,40 @@ func TestPostSigned_WrapsHTTPStatusOnDecodeFailure(t *testing.T) {
 	}
 }
 
+func TestWithProxy_SetsProxiedTransport(t *testing.T) {
+	c := NewClient()
+	pc, err := c.WithProxy("http://user:pass@127.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := pc.http.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		t.Fatal("expected an *http.Transport with a Proxy func")
+	}
+	u, err := tr.Proxy(httptest.NewRequest("GET", "http://autoglm-api.autoglm.ai/x", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil || u.Host != "127.0.0.1:8080" {
+		t.Errorf("proxy = %v, want host 127.0.0.1:8080", u)
+	}
+}
+
+func TestWithProxy_EmptyReturnsReceiver(t *testing.T) {
+	c := NewClient()
+	pc, err := c.WithProxy("")
+	if err != nil || pc != c {
+		t.Errorf("empty proxy: got (%p,%v), want receiver unchanged", pc, err)
+	}
+}
+
+func TestWithProxy_InvalidURLErrors(t *testing.T) {
+	c := NewClient()
+	if _, err := c.WithProxy("http://%zz"); err == nil {
+		t.Error("expected error for malformed proxy url")
+	}
+}
+
 func TestGoogleOAuthURL(t *testing.T) {
 	c, done := newTestClient(t, func(path string, body map[string]any, auth string) any {
 		if path != "/userapi/overseasv1/google-oauth-url" {
